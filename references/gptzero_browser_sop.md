@@ -16,58 +16,11 @@ Codex 内置浏览器实测中，游客页提示文本至少 250 个字符，276
 
 ## 登录、限制与结果核对
 
-在启动浏览器上传前，使用 `export-pdf` 生成带完整超链接与黄色高亮的 PDF，并一键暂存至内置浏览器沙箱的 `uploads/` 目录：
-```bash
-python scripts/humanizer_loop.py export-pdf --docx paper.docx --stage-to "<ArtifactDir>/browser_sandbox/uploads" --output pdf_res.json
-```
-> 注：向 `browser` Subagent 传递上传文件名时，仅传单段文件名（如 `paper.pdf`），由其在沙箱 `uploads/` 目录内读取上传。
+- 如果登录、验证码或二次验证阻止继续，用宿主提供的接管方式交给用户。有会话可复用时，接回同一个浏览器继续。可用无登录模式满足需求时可直接完成。
+- 遇到实际额度或频率限制，保留已看到的结果。根据当前界面的信息决定稍后重试、使用已有报告，还是请用户决定是否继续。
+- 记录界面实际显示的分类、分数和扫描范围。没有分页视图时，只提供这次能核实的结果。整篇的 `Human`、`Mixed`、`AI` 跟逐页评分、句子高亮分别按报告自身含义解释。
 
----
+## 导出报告与分享链接
 
-## 2. 登录护航与人机校验安全红线
-
-1. **打开检测页**：驱动内置 `browser` Subagent 访问 `https://app.gptzero.me`。
-2. **严禁绕过任何安全或人机校验**：
-   - 一旦页面要求登录，或触发 **hCaptcha / Cloudflare Turnstile** 等“验证您是人类”拦截，Agent **必须立即停止操作并暂停**。
-   - 礼貌引导用户在可见的内置浏览器窗口中手动登录账号并完成人机验证。
-   - **提示用户登录免费账号的价值**：登录免费 GPTZero 账号通常即可获得 **10,000 credits** 以及最关键的 **`Page by page scan`（逐页分页评分）**，稳定性和信息量远高于未登录游客模式。
-3. **复用同一个浏览器会话**：
-   - 当用户完成登录与验证并回复确认后，Agent **必须通过 `send_message` 复用同一个已保留 Cookie 的 `browser` Subagent 会话**接手后续上传与检测，切勿新开无 Cookie 的 `browser` 实例。
-
----
-
-## 3. 弹窗处理、免费额度避坑与视图差异
-
-- **鉴别 `Advanced AI Scan` 假 HTTP 429 弹窗与连环广告自动清理**：
-  - 实测中 GPTZero 首页右侧 `Advanced AI Scan` 默认锁定勾选且**无法取消**（即使免费账号显示 `0 advanced scans left`），导致点击 `Scan` 或上传后必然并发触发 `POST /v3/ai/text` / `/v3/ai-vocab-scan` HTTP 429 并默认跳入 `Advanced` 标签页，随即弹出**最多 3 连套娃营销弹窗**：
-    1. `7 day Free Trial` ➔ 点击右上角 **`×`**；
-    2. `Your first year, 30% off`（无 `×`）➔ 点击底部灰字 **`Pass on premium, continue free`**；
-    3. `Free chrome extension`（无 `×`）➔ 点击底部 **`Maybe later`**（通用兜底：`Close` / `No thanks` / `Skip` / `Esc`）。
-  - **AI Agent 必须自动连环关闭全部垃圾营销弹窗并切回 `Basic Scan`（或 `?scanType=basic`），绝不因此误判为“不可关闭付费阻断”或打扰用户**；只有当 `Basic Scan` 自身报错或免费 credits 归零时，才暂停询问用户换号。
-- **PDF 视图 vs Editor 视图差异**：
-  - 结果页默认的 **PDF 视图** 会以黄色高亮叠加层直接标出 AI 句子，而 **Editor 视图** 仅按单页展示纯文本、不显示黄色高亮；定位高 AI 句时应结合 PDF 视图高亮与本地 `inspect` 文本。
-- **锁定免费检测模式**：日常反复轮测专心使用免费的 **Basic Scan（Model 5.0b）** 与 `Page by page scan`，**默认避开付费 `Advanced` 或 `Hallucination` 标签页**。
-
----
-
-## 4. 额度耗尽与 HTTP 429 换号询问机制
-
-一旦页面出现以下任一情况：
-- 当前账号 `credits` 耗尽；
-- 触发 `HTTP 429` 频率或额度阻断；
-- 弹出无法关闭的强制升级付费拦截；
-
-Agent **必须立即暂停**，向用户清晰汇报当前剩余额度/报错状态，并**主动询问用户**：
-> “当前 GPTZero 账号额度已耗尽或触发限制，请问您是否需要在内置浏览器窗口中退出并切换登录另一个 GPTZero 账号（或改用仅剩的免费模式）？”
-
-若用户选择换号，交由用户在可见窗口手动退出重登（并完成可能出现的新验证码）；用户确认后，Agent 再次通过 `send_message` 复用同一浏览器会话无缝恢复检测。
-
----
-
-## 5. 终检交付：导出 GPTZero 原生 PDF 报告
-
-- **免费导出原生报告（避开 `/batches/...` 无响应陷阱）**：
-  - 注意：上传 PDF 后默认进入的 `/batches/...` 批次页右上角 `Export` / `Share` 按钮可能无响应（no-op）。
-  - **正确路径**：点击左侧导航栏 **`Scans`**（`/documents-history`）打开对应文档进入单文档路由 `/documents/<docId>?scanType=basic`，然后点击右上角 **`Export`** ➔ 在 `Download PDF Report` 弹窗点击 **`Download PDF`**，即可免费下载原生 PDF 报告（落盘至浏览器沙箱 `downloads/` 目录）。
-- **归档交付**：将 `downloads/` 中新生成的 `GPTZero_*.pdf` 复制归档至用户目标交付目录（建议命名 `<原文件名>_gptzero_report.pdf`），随最终 `.docx` / `.pdf` 一并交付。
-- **降级兜底**：若因页面改版或网络异常导致 `Export` 失败，自动降级为附上 **Share 分享链接（单文档 `Share` ➔ 开启 `Link sharing is on`）+ `Basic Scan` 分页截图**，不阻塞最终交付。
+- **导出原生 PDF 报告**：终检达标并需附上检测证明时，若 `/batches/...` 批次页右上角的 `Export` / `Share` 按钮无响应，先从左侧 **`Scans`**（`/documents-history`）点开对应文档进入单文档路由 `/documents/<docId>?scanType=basic`，再点击 **`Export`** ➔ **`Download PDF`** 即可免费下载原生 PDF 报告并归档交付。
+- **分享链接与截图兜底**：单文档页点击 **`Share`** 可免费开启分享链接；若导出受限，也可附上分享链接与 `Basic Scan` 分页截图。
