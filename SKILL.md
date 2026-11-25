@@ -3,7 +3,7 @@ name: bunnyscholar-gptzero-loop
 description: >-
   Use BunnyScholar's Humanizer API for Chinese or English text, optionally review GPTZero results, and apply selected revisions to Word. Use for 拟人改写、降 AI 率、GPTZero 报告复核 or reversible DOCX revisions.
 metadata:
-  version: "1.2.4"
+  version: "1.2.5"
   source: https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main/SKILL.md
   repo: https://github.com/Whitopus/bunnyscholar-gptzero-loop
 ---
@@ -24,9 +24,9 @@ Follow the user's text, language, target platform, scope, and deliverable. Use t
 
 ## Decide what to preserve before rewriting
 
-- Inspect the selected text or supplied report yourself. Propose a short list of names, defined terms, and phrases worth keeping verbatim. Note any key facts that can be rephrased while retaining their meaning.
-- When the proposed choices matter and the user has left them open, show the recommendation and ask for confirmation or edits in one short exchange before the first API rewrite. Continue local preparation in the meantime. Reuse a settled list across rounds. If the user's instructions settle the list or delegate the decision, proceed with those instructions. If no wording needs special protection, proceed directly.
-- Pass the verbatim list via `--personal-terms`. Review `missing_personal_terms` and compare key facts against the source before accepting a candidate. See the [term selection example](references/anti_ai_playbook.md#personal-terms).
+- Inspect the selected text or supplied report yourself. Identify wording that must stay verbatim, wording worth keeping initially but open to later changes, and facts whose wording can vary. Start with a short list.
+- When the proposed choices matter and the user has left them open, agree on the required wording and the room for later changes in one short exchange before the first API rewrite. Continue local preparation in the meantime. If the user has settled or delegated those choices, proceed within that scope. If no wording needs special protection, proceed directly.
+- Pass the currently protected wording via `--personal-terms`. When a comparable scan stalls or a candidate reads rigidly, use later authorized rounds to loosen optional wording in small steps. Allow equivalent phrases first and consider broader changes to sentence structure if warranted. Keep required wording, factual meaning, and citations. Review `missing_personal_terms` and compare each candidate with the source and the best acceptable version. Ask again only if a useful next step would change a requirement or exceed the authorized scope or budget. See the [iteration example](references/anti_ai_playbook.md#loosen-wording).
 
 ## Help the user sign in or switch accounts
 
