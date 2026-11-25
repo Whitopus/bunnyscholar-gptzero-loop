@@ -23,9 +23,11 @@ import urllib.request
 import warnings
 import xml.etree.ElementTree as ET
 import zipfile
+from collections import Counter
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Hashable, Iterable, List, Optional, Sequence, Set, Tuple
 from xml.sax.saxutils import escape as xml_escape
 
 if os.name == "nt":
@@ -42,7 +44,7 @@ DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 LOGIN_URL = "https://bunnyscholar.cn/"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
-SKILL_VERSION = "1.2.5"
+SKILL_VERSION = "1.2.6"
 SUPPORTED_HUMANIZER_LANGUAGES: Tuple[str, ...] = ("en", "zh_CN")
 SUPPORTED_PLATFORMS_BY_LANGUAGE: Dict[str, Tuple[str, ...]] = {
     "zh_CN": ("cnki", "wanfang", "weipu", "gezida", "daya", "turnitin"),
@@ -2054,6 +2056,131 @@ def _matching_personal_terms(text: str, terms: Sequence[str]) -> List[str]:
     return matched
 
 
+_SMALL_NUMBERS = (
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+    "fourteen fifteen sixteen seventeen eighteen nineteen"
+).split()
+_TENS = "twenty thirty forty fifty sixty seventy eighty ninety".split()
+_NUMBER_WORDS = {word: index for index, word in enumerate(_SMALL_NUMBERS)}
+_NUMBER_WORDS.update({word: index * 10 for index, word in enumerate(_TENS, start=2)})
+_INTEGER_PART = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
+_NUMBER_RE = re.compile(
+    rf"(?<![A-Za-z0-9_])(?P<digits>[-+−]?(?:{_INTEGER_PART}(?:\.\d+)?|\.\d+)(?:[Ee][+-]?\d{{1,4}})?)"
+    rf"|(?<![A-Za-z0-9_])(?P<words>(?i:(?:{'|'.join(_TENS)})"
+    rf"(?:(?:[-‐‑]|\s+)(?:{'|'.join(_SMALL_NUMBERS[1:10])}))?|{'|'.join(_SMALL_NUMBERS)}))"
+    r"(?![A-Za-z0-9_])"
+)
+_UNIT_ALIASES = {
+    "s": "seconds second secs sec 秒",
+    "min": "minutes minute mins 分钟",
+    "h": "hours hour hrs hr 小时",
+    "d": "days day 天",
+    "V": "volts volt 伏特",
+    "mV": "millivolts millivolt 毫伏",
+    "A": "amperes ampere amps amp 安培",
+    "mA": "milliamps milliamp 毫安",
+    "W": "watts watt 瓦特",
+    "Ω": "ohms ohm 欧姆",
+    "Hz": "hertz 赫兹",
+    "m": "metres metre meters meter 米",
+    "cm": "centimeters centimeter centimetres centimetre 厘米",
+    "mm": "millimeters millimeter millimetres millimetre 毫米",
+    "kg": "kilograms kilogram 千克 公斤",
+    "g": "grams gram 克",
+    "mg": "milligrams milligram 毫克",
+    "mL": "milliliters milliliter millilitres millilitre 毫升",
+    "L": "liters liter litres litre 升",
+    "°C": "celsius 摄氏度 ℃",
+    "°F": "fahrenheit 华氏度 ℉",
+    "%": "percent ％",
+}
+_UNIT_NAMES = {name: symbol for symbol, names in _UNIT_ALIASES.items() for name in names.split()}
+_UNIT_SYMBOLS = (
+    *_UNIT_ALIASES, "µs", "ms", "kV", "µA", "kW", "kΩ", "kHz", "MHz", "GHz",
+    "µm", "nm", "µg", "K", "dB", "rpm", "Pa", "kPa", "MPa", "mol", "mmol", "‰",
+)
+_UNIT_RE = re.compile(
+    r"\s*(?:[-‐‑]\s*)?(?:(?P<symbol>" + "|".join(map(re.escape, sorted(_UNIT_SYMBOLS, key=len, reverse=True)))
+    + r")|(?P<name>(?i:" + "|".join(map(re.escape, sorted(_UNIT_NAMES, key=len, reverse=True)))
+    + r")))(?![A-Za-z0-9_])"
+)
+_NEGATION_RE = re.compile(
+    r"\b(?:[a-z]+n['’]t|cannot|not(?!\s+only\b)|no|never|without|neither|nor)\b"
+    r"|并未|尚未|未能|未(?=发现|观察到|建立|证实|达到)|没有|并非|不是|不能|无法|不再",
+    re.IGNORECASE,
+)
+_QUALIFIER_RE = re.compile(
+    r"\b(?:may|might|possibly|possible|potentially|probably|likely|unlikely|suggests?|suggested"
+    r"|at\s+least|at\s+most|up\s+to|less\s+than|more\s+than|only|approximately|roughly|typically|generally"
+    r"|to\s+(?:a\s+(?:significant|limited|large|small)|some)\s+(?:degree|extent)"
+    r"|in\s+(?:real[-‑ ]world|laboratory)\s+(?:conditions|scenarios|settings)"
+    r"|(?:about|around)\s*(?=[+\-−]?\d))\b"
+    r"|至少|至多|不超过|低于|高于|仅限|可能|或许|也许|大概|大约|约(?=\s*\d)|似乎",
+    re.IGNORECASE,
+)
+_QUALIFIER_EQUIVALENTS = {
+    **dict.fromkeys(("may", "might", "possibly", "possible", "potentially"), "possible"),
+    **dict.fromkeys(("suggest", "suggests", "suggested"), "suggest"),
+    **dict.fromkeys(("approximately", "roughly", "about", "around"), "approximately"),
+    **dict.fromkeys(("可能", "或许", "也许"), "可能"),
+    **dict.fromkeys(("约", "大约", "大概"), "约"),
+}
+
+
+def _fidelity_signals(text: str) -> Dict[str, List[Tuple[Hashable, str]]]:
+    """提取可做字面比较的常见数值、数量单位对、否定词和限定词。"""
+    prose = CITATION_GROUP_RE.sub(" ", URL_RE.sub(" ", text))
+    signals: Dict[str, List[Tuple[Hashable, str]]] = {
+        "numbers": [], "quantities": [], "negations": [], "qualifiers": [],
+    }
+    for match in _NUMBER_RE.finditer(prose):
+        raw = match[0]
+        if match["digits"]:
+            value = Decimal(raw.replace(",", "").replace("−", "-"))
+        else:
+            value = Decimal(sum(_NUMBER_WORDS[word] for word in re.split(r"[-‐‑\s]+", raw.lower())))
+        signals["numbers"].append((value, raw))
+        unit_match = _UNIT_RE.match(prose, match.end())
+        if unit_match:
+            unit = unit_match["symbol"] or _UNIT_NAMES[unit_match["name"].lower()]
+            signals["quantities"].append(((value, unit), prose[match.start():unit_match.end()]))
+    for match in _NEGATION_RE.finditer(prose):
+        raw = match[0]
+        key = raw.lower().replace("’", "'")
+        if key == "cannot" or key.endswith("n't"):
+            key = "not"
+        signals["negations"].append((key, raw))
+    for match in _QUALIFIER_RE.finditer(prose):
+        raw = match[0].strip()
+        key = " ".join(raw.lower().split())
+        signals["qualifiers"].append((_QUALIFIER_EQUIVALENTS.get(key, key), raw))
+    return signals
+
+
+def _unmatched_signals(observed: Sequence[Tuple[Hashable, str]], other: Sequence[Tuple[Hashable, str]]) -> List[str]:
+    remaining = Counter(key for key, _ in other)
+    unmatched = []
+    for key, text in observed:
+        if remaining[key]:
+            remaining[key] -= 1
+        else:
+            unmatched.append(text)
+    return unmatched
+
+
+def compare_fidelity(source: str, candidate: str) -> List[Dict[str, Any]]:
+    original_signals = _fidelity_signals(source)
+    candidate_signals = _fidelity_signals(candidate)
+    differences = []
+    for kind, original in original_signals.items():
+        revised = candidate_signals[kind]
+        removed = _unmatched_signals(original, revised)
+        added = _unmatched_signals(revised, original)
+        if removed or added:
+            differences.append({"kind": kind, "removed": removed, "added": added})
+    return differences
+
+
 def run_humanize_batch(
     input_path: Optional[Path],
     output_path: Optional[Path],
@@ -2238,7 +2365,12 @@ def run_humanize_batch(
             "quality_issues": last_issues,
             "attempts_used": attempts_used,
             "usage": last_usage,
+            "fidelity_warnings": compare_fidelity(src_text, last_text),
         }
+        if result["fidelity_warnings"]:
+            log_stderr(
+                f"Review paragraph {para_index}: possible meaning changes; see fidelity_warnings in the result."
+            )
         if personal_terms:
             matched_terms = _matching_personal_terms(src_text, personal_terms)
             kept_terms = set(_matching_personal_terms(last_text, matched_terms))
@@ -2536,6 +2668,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_hum.add_argument("--max-word-len", type=int, default=16, help="Max allowed alphabetical word length before garbled-word trigger (default: 16).")
     p_hum.add_argument("--disable-quality-gate", action="store_true", help="Skip quality-gate checks and retries.")
 
+    p_review = subparsers.add_parser(
+        "review-text",
+        help="Compare two UTF-8 text files for factual cues locally without an API key.",
+    )
+    p_review.add_argument("--source", required=True, type=Path, help="Path to the original UTF-8 text.")
+    p_review.add_argument("--candidate", required=True, type=Path, help="Path to the rewritten UTF-8 text.")
+    p_review.add_argument("--output", default=None, help="Optional path to write the JSON comparison.")
+
     # 6. apply
     p_apply = subparsers.add_parser(
         "apply",
@@ -2677,6 +2817,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 text_file=args.text_file,
                 dry_run=args.dry_run,
             )
+            return 0
+
+        if args.command == "review-text":
+            source = args.source.read_text(encoding="utf-8-sig")
+            candidate = args.candidate.read_text(encoding="utf-8-sig")
+            if not source.strip() or not candidate.strip():
+                raise CliError("Provide non-empty original and candidate text files.")
+            emit_result({"fidelity_warnings": compare_fidelity(source, candidate)}, args.output)
             return 0
 
         if args.command == "apply":

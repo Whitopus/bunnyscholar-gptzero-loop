@@ -41,6 +41,18 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output res
 
 带逗号的术语用 JSON 字符串数组传入。用 `--dry-run` 可先查看每段命中的 `matched_personal_terms`。改写结果用 `missing_personal_terms` 提示原文中出现、候选中未按相同措辞出现的术语，比较忽略大小写和空白差异。像 `twenty-four hours` 写成 `24 hours` 也会列出，方便结合语义核对。提示本身不会触发付费重试。
 
+<a id="review-candidate"></a>
+
+## 候选稿送检前怎么核对
+
+`humanize` 在每段结果里附上 `fidelity_warnings`，分别列出数字、有单位的数值、否定词和限定词在原文与候选中的增减。例如 `0.2 V` 变成 `0.2 °C` 会标出数量单位对的变化，`did not` 或 `may` 消失也会提示。常见等义写法如 `twenty-four hours` 和 `24 h` 按同一数值和单位比较。提示只用于复核，不会自动重试。
+
+Agent 对照原句判断变化是否影响结论，再决定是否值得送检。数字和关键词全保留时，也要检查它们仍指向同一对象，尤其是否定范围、因果强度和引文。手上已有候选时，把同一段原文和候选各存一份 UTF-8 文本，即可离线核对。
+
+```sh
+python scripts/humanizer_loop.py review-text --source original.txt --candidate candidate.txt
+```
+
 <a id="loosen-wording"></a>
 
 ## 后续轮次怎么放宽

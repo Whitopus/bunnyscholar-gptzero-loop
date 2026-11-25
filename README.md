@@ -94,10 +94,13 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output res
 
 **保留关键词**。Agent 会先读原文，建议哪些词必须原样保留、哪些可以在复测停滞时逐步放开，再和你简短确认。你已经给了明确要求，或说「你定」，它就直接继续。手动用 CLI 时可传 `--personal-terms "VALORANT,Riot Games"`。 [术语白名单用法](references/anti_ai_playbook.md#personal-terms) · [后续轮次示例](references/anti_ai_playbook.md#loosen-wording)
 
+**复测前核对**。改写结果按段提示数字、单位、否定和限定词的变化。Agent 先看这些变化会不会改掉原意，再判断是否送检。 [候选稿核对](references/anti_ai_playbook.md#review-candidate)
+
 | 命令 | 何时用 |
 | :--- | :--- |
 | `check-env --quick --summary` | 查看 Python、Key 来源与本地 API 说明。Agent 可省去 `--summary` 读取 JSON。 |
 | `setup-key` | 自动复用已有 Key，或在本地终端无回显录入并验证保存结果（默认写入 `~/.env`）。 |
+| `review-text --source original.txt --candidate candidate.txt` | 离线核对两份文本中的数字、单位、否定和限定词。 |
 | `inspect --docx paper.docx` | 找正文段号、引文、高亮与硬分页。 |
 | `apply --docx paper.docx --humanized result.json --output-docx paper.revised.docx` | 按匹配的段号写入选定结果并另存副本。 |
 | `snapshot --docx paper.docx` / `rollback --docx paper.docx --list` | 多轮修订时存档、查看或恢复版本。 |
@@ -177,6 +180,8 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output res
 English/GPTZero are the defaults. For Word, use `inspect` to locate paragraph IDs and `apply --output-docx` to save a revised copy.
 
 The agent reads the source first and identifies required wording and optional wording it can loosen if later scans stall. It asks about choices that matter unless you have already settled or delegated them. For direct CLI use, pass `--personal-terms "first term,second phrase"`. [Term preservation](references/anti_ai_playbook.md#personal-terms)
+
+The result lists changes in numbers, quantities with units, negations, and qualifiers to review before sending a candidate to the detector. [Candidate review](references/anti_ai_playbook.md#review-candidate)
 
 To sign in or switch accounts, have the agent open the relevant screen, hand it over for verification or account selection, and resume the task when you return control. BunnyScholar's web session and CLI key can be switched independently. [GPTZero sign-in and account switching](references/gptzero_browser_sop.md#sign-in-and-switch) · [BunnyScholar account switching](references/onboarding_guide.md#switch-accounts)
 
