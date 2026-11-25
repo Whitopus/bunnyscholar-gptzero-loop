@@ -22,5 +22,5 @@ Codex 内置浏览器实测中，游客页提示文本至少 250 个字符，276
 
 ## 导出报告与分享链接
 
-- **导出原生 PDF 报告**：终检达标并需附上检测证明时，若 `/batches/...` 批次页右上角的 `Export` / `Share` 按钮无响应，先从左侧 **`Scans`**（`/documents-history`）点开对应文档进入单文档路由 `/documents/<docId>?scanType=basic`，再点击 **`Export`** ➔ **`Download PDF`** 即可免费下载原生 PDF 报告并归档交付。
+- **导出原生 PDF 报告**：终检达标并需附上检测证明时，若 `/batches/...` 批次页右上角的 `Export` / `Share` 按钮无响应，先从左侧 **`Scans`**（`/documents-history`）点开对应文档（可能会在新标签页打开单文档路由 `/documents/<docId>?scanType=basic`），再点击 **`Export`** ➔ **`Download PDF`** 即可免费下载原生 PDF 报告并归档交付。
 - **分享链接与截图兜底**：单文档页点击 **`Share`** 可免费开启分享链接；若导出受限，也可附上分享链接与 `Basic Scan` 分页截图。

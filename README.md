@@ -80,14 +80,14 @@ python scripts/humanizer_loop.py check-env --quick --summary
 
 ### 🧰 命令行用法（可选）
 
-将一段文字保存成 UTF-8 的 `paragraph.txt`，先本地预检计费字符数，确认后再执行真实改写（结果在输出 JSON 的 `paragraphs[0].text`）：
+将一段文字保存成 UTF-8 的 `paragraph.txt`，`--dry-run` 会同时估算计费字符数与参考费用（CNY），确认后再执行真实改写（结果在输出 JSON 的 `paragraphs[0].text`）：
 
 ```sh
 python scripts/humanizer_loop.py humanize --text-file paragraph.txt --dry-run
 python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output result.json --allow-quality-warnings
 ```
 
-默认按英文 GPTZero 处理；中文知网可追加 `--language zh_CN --platform cnki`。多段或需对应 Word 段号时改用 `--input paragraphs.json`。[JSON 示例与 Word 操作](references/anti_ai_playbook.md)
+默认按英文 GPTZero 处理；中文知网只需追加 `--language zh_CN`（会自动默认 `cnki`）。多段或需对应 Word 段号时改用 `--input paragraphs.json`。[JSON 示例与 Word 操作](references/anti_ai_playbook.md)
 
 | 命令 | 何时用 |
 | :--- | :--- |

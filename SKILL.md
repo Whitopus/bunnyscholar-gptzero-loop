@@ -3,7 +3,7 @@ name: bunnyscholar-gptzero-loop
 description: >-
   Use BunnyScholar's Humanizer API for Chinese or English text, optionally review GPTZero results, and apply selected revisions to Word. Use for 拟人改写、降 AI 率、GPTZero 报告复核 or reversible DOCX revisions.
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
   source: https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main/SKILL.md
   repo: https://github.com/Whitopus/bunnyscholar-gptzero-loop
 ---
@@ -23,10 +23,10 @@ Follow the user's text, language, target platform, scope, and deliverable. Use t
 
 ## Using the services
 
-- For API parameters, supported platforms, and current pricing, use BunnyScholar's [official API reference](https://bunnyscholar.cn/skills/bunnyscholar-api.md). An installed `bunnyscholar-api` skill can help locate the details. This CLI can run with a key alone. Default CLI parameters are `en` and `gptzero`; pass the requested settings explicitly when they differ, such as `--language zh_CN --platform cnki`. Ask about a missing choice only when it affects the operation. For similarity-only requests, the official academic rewrite endpoint is the relevant service.
+- For API parameters, supported platforms, and current pricing, use BunnyScholar's [official API reference](https://bunnyscholar.cn/skills/bunnyscholar-api.md). An installed `bunnyscholar-api` skill can help locate the details. This CLI can run with a key alone. The humanizer supports `en` (default `gptzero`) and `zh_CN` (default `cnki`), with 20–500 billable chars per call (split long paragraphs at sentence boundaries). Ask about a missing choice only when it affects the operation. Report indicators override verbal descriptions (`detected as AI`/`AIGC` -> `humanizer`; `Similarity` -> `academic-rewrite`; both -> `--dual-stage`). For one-off full-Word batching with a report, the web app (`https://bunnyscholar.cn/document_write`, Pro points) is also an option.
 - Keep credentials in the user's terminal or environment, outside chat and logs. `setup-key` reuses a configured key automatically. If it needs a new key, the user's interactive terminal handles hidden input and verifies the saved file. Authentication and balance are determined by the service.
 - A live rewrite sends the selected text to BunnyScholar and can incur charges. After first-time setup, point the user to [usage and balance](https://bunnyscholar.cn/developer) and let them know they can [top up](https://bunnyscholar.cn/developer/recharge) if needed. For a larger batch, a local length estimate can help the user decide. An online scan sends content to the detector. Use the services within the requested scope and respect any budget or round limit.
 - Use the browser tools available in the current host. If the site requires a sign-in or a human verification, let the user complete that step in the same session. Existing reports or user-provided results also work.
-- Preserve the original API response as a candidate and review it for meaning, references, and technical terms. If you or the user edits the candidate, attribute any detector score to the version actually scanned. Page selection, highlighting, quality checks, retry count, and the stopping point are task decisions.
+- Preserve the original API response as a candidate and review it for meaning, references, and technical terms. Remind the user to use the result directly—if adjustments are needed, only trim rather than adding words (or revise the source text and re-run). If you or the user edits the candidate, attribute any detector score to the version actually scanned. Page selection, highlighting, quality checks, retry count, and the stopping point are task decisions.
 
 Report the requested deliverables with relevant changes, any scans actually run, and the usage reported by the service when available. When a final PDF scan is run and the user needs proof, export and attach the native GPTZero PDF report from the single-document view (`Export` -> `Download PDF`, see [GPTZero browser notes](references/gptzero_browser_sop.md)). If there is no new measurement, say so. A newer Skill version can be mentioned when relevant and handled separately from the task. See [CLI examples](README.md#cli-tools).

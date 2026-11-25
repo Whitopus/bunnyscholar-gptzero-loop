@@ -42,7 +42,13 @@ DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 LOGIN_URL = "https://bunnyscholar.cn/"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
-SKILL_VERSION = "1.2.0"
+SKILL_VERSION = "1.2.1"
+SUPPORTED_HUMANIZER_LANGUAGES: Tuple[str, ...] = ("en", "zh_CN")
+SUPPORTED_PLATFORMS_BY_LANGUAGE: Dict[str, Tuple[str, ...]] = {
+    "zh_CN": ("cnki", "wanfang", "weipu", "gezida", "daya", "turnitin"),
+    "en": ("turnitin", "gptzero", "quillbot", "zerogpt", "cnki", "wanfang", "gezida", "weipu"),
+}
+HUMANIZER_REF_UNIT_PRICE_CNY = 1.0
 SKILL_REPO_URL = "https://github.com/Whitopus/bunnyscholar-gptzero-loop"
 SKILL_REMOTE_RAW_BASE = "https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main"
 SKILL_REMOTE_SKILL_MD_URL = f"{SKILL_REMOTE_RAW_BASE}/SKILL.md"
@@ -1883,7 +1889,7 @@ def call_humanizer_api(
     payload_obj: Dict[str, Any] = {
         "text": text,
         "language": language,
-        "platform": platform_name,
+        "platform": resolved_platform,
         "needPlagiarismReduction": bool(dual_stage),
     }
     if personal_terms:
@@ -1992,14 +1998,30 @@ def run_humanize_batch(
     ignore_process_env: bool = False,
     allow_quality_warnings: bool = False,
     language: str = "en",
-    platform_name: str = "gptzero",
+    platform_name: Optional[str] = None,
     allow_first_person: bool = False,
     max_word_len: int = 16,
     disable_quality_gate: bool = False,
     text_file: Optional[str] = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """预检段落长度，并按需调用 API 与检查改写结果。"""
+    """预检段落长度与语言/平台参数，并按需调用 API 与检查改写结果。"""
+    if language not in SUPPORTED_HUMANIZER_LANGUAGES:
+        raise CliError(
+            f"Unsupported --language '{language}' for BunnyScholar humanizer; "
+            f"supported values: {', '.join(SUPPORTED_HUMANIZER_LANGUAGES)}."
+        )
+    resolved_platform = platform_name if platform_name else ("cnki" if language == "zh_CN" else "gptzero")
+    allowed_platforms = SUPPORTED_PLATFORMS_BY_LANGUAGE[language]
+    dry_warnings: List[str] = []
+    if resolved_platform not in allowed_platforms:
+        warn_msg = (
+            f"Platform '{resolved_platform}' is not in documented {language} list "
+            f"({', '.join(allowed_platforms)}); BunnyScholar server may fall back to default."
+        )
+        dry_warnings.append(warn_msg)
+        log_stderr(f"Warning: {warn_msg}")
+
     if not dry_run and output_path is None:
         raise CliError("Provide --output for live requests, or use --dry-run to check the input first.")
 
@@ -2042,17 +2064,26 @@ def run_humanize_batch(
         validated_items.append((para_index, src_text, billable))
 
     if dry_run:
-        preview = {
+        total_billable = sum(item[2] for item in validated_items)
+        est_cost = round((total_billable / 1000.0) * HUMANIZER_REF_UNIT_PRICE_CNY, 4)
+        preview: Dict[str, Any] = {
             "dry_run": True,
             "language": language,
-            "platform": platform_name,
+            "platform": resolved_platform,
             "dual_stage": dual_stage,
-            "total_billable_chars_estimated": sum(item[2] for item in validated_items),
+            "total_billable_chars_estimated": total_billable,
+            "estimated_cost_cny": est_cost,
+            "pricing_note": (
+                f"Reference unit price: {HUMANIZER_REF_UNIT_PRICE_CNY} CNY / 1000 billable chars "
+                "(credits used before cash balance; live pricing: https://bunnyscholar.cn/developer/pricing)."
+            ),
             "paragraphs": [
                 {"para_index": para_index, "billable_chars_estimated": billable}
                 for para_index, _, billable in validated_items
             ],
         }
+        if dry_warnings:
+            preview["warnings"] = dry_warnings
         emit_result(preview, str(output_path) if output_path else None)
         return preview
 
@@ -2090,7 +2121,7 @@ def run_humanize_batch(
                 http_retries=http_retries,
                 personal_terms=personal_terms,
                 language=language,
-                platform_name=platform_name,
+                platform_name=resolved_platform,
             )
             # 保留服务的原始候选文本，便于比较与复测。
             api_text = resp["data"]["text"]
@@ -2139,7 +2170,7 @@ def run_humanize_batch(
         "api_url": api_url,
         "key_source": key_source,
         "language": language,
-        "platform": platform_name,
+        "platform": resolved_platform,
         "dual_stage": bool(dual_stage),
         "allow_first_person": bool(allow_first_person),
         "max_word_len": int(max_word_len),
@@ -2410,8 +2441,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit 0 even if some paragraphs fail quality gate after max retries (results remain unmodified).",
     )
-    p_hum.add_argument("--language", default="en", help="Target language for BunnyScholar humanizer (default: en).")
-    p_hum.add_argument("--platform", default="gptzero", help="Target AI detector platform (default: gptzero).")
+    p_hum.add_argument("--language", default="en", help="Target language for BunnyScholar humanizer (en or zh_CN; default: en).")
+    p_hum.add_argument("--platform", default=None, help="Target AI detector platform (default: gptzero for en, cnki for zh_CN).")
     p_hum.add_argument("--allow-first-person", action="store_true", help="Disable first-person pronoun check in quality gate.")
     p_hum.add_argument("--max-word-len", type=int, default=16, help="Max allowed alphabetical word length before garbled-word trigger (default: 16).")
     p_hum.add_argument("--disable-quality-gate", action="store_true", help="Skip quality-gate checks and retries.")
