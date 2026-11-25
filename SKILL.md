@@ -3,7 +3,7 @@ name: bunnyscholar-gptzero-loop
 description: >-
   Use BunnyScholar's Humanizer API for Chinese or English text, optionally review GPTZero results, and apply selected revisions to Word. Use for 拟人改写、降 AI 率、GPTZero 报告复核 or reversible DOCX revisions.
 metadata:
-  version: "1.2.3"
+  version: "1.2.4"
   source: https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main/SKILL.md
   repo: https://github.com/Whitopus/bunnyscholar-gptzero-loop
 ---
@@ -18,9 +18,15 @@ Follow the user's text, language, target platform, scope, and deliverable. Use t
 | --- | --- |
 | First-time setup | If a key may already exist, run `check-env --quick --summary` and reuse it when found. For a new account, open BunnyScholar's homepage for sign-in. After the user signs in, resume in the same browser, open API Keys, and fill a convenient name if the browser supports it. Give the user the exact `setup-key` command before they create the key and paste it in their terminal. See the [setup guide](references/onboarding_guide.md). |
 | Check or update the Skill | Run `self-update` to check the installed version. If the user asks to update, run `self-update --apply`, verify the reported version, and read the updated Skill before continuing. See the [update instructions](README.md#update). |
-| Rewrite pasted text or a short text file | Use `humanize --text-file paragraph.txt --output result.json --allow-quality-warnings` for one paragraph, or `--input` with JSON for a batch. Use `--dry-run` when useful for checking length or estimating usage. Return a candidate and call out meaning or terminology issues that need review. |
+| Rewrite pasted text or a short text file | Read the selected text and identify what needs preserving before the first rewrite. Use `humanize --text-file paragraph.txt --output result.json --allow-quality-warnings` for one paragraph, or `--input` with JSON for a batch. Use `--dry-run` when useful for checking length or estimating usage. Return a candidate and call out meaning or terminology issues that need review. |
 | Interpret a GPTZero report | Start with the supplied report, screenshot, or share link. If the user wants a fresh result, use the available browser or ask for a new report only when access is blocked. See [GPTZero browser notes](references/gptzero_browser_sop.md). |
 | Revise an existing Word file | Use `inspect` to identify paragraph IDs and compare them with the report. Work on a copy via `apply --output-docx` or keep a snapshot when editing in place. Check the affected paragraphs and layout. Export and scan a PDF only when page-level results matter. See the [Word and iteration notes](references/anti_ai_playbook.md). |
+
+## Decide what to preserve before rewriting
+
+- Inspect the selected text or supplied report yourself. Propose a short list of names, defined terms, and phrases worth keeping verbatim. Note any key facts that can be rephrased while retaining their meaning.
+- When the proposed choices matter and the user has left them open, show the recommendation and ask for confirmation or edits in one short exchange before the first API rewrite. Continue local preparation in the meantime. Reuse a settled list across rounds. If the user's instructions settle the list or delegate the decision, proceed with those instructions. If no wording needs special protection, proceed directly.
+- Pass the verbatim list via `--personal-terms`. Review `missing_personal_terms` and compare key facts against the source before accepting a candidate. See the [term selection example](references/anti_ai_playbook.md#personal-terms).
 
 ## Help the user sign in or switch accounts
 
@@ -34,6 +40,5 @@ Follow the user's text, language, target platform, scope, and deliverable. Use t
 - Keep credentials in the user's terminal or environment, outside chat and logs. `setup-key` reuses a configured key automatically. If it needs a new key, the user's interactive terminal handles hidden input and verifies the saved file. Authentication and balance are determined by the service.
 - A live rewrite sends the selected text to BunnyScholar and can incur charges. After first-time setup, point the user to [usage and balance](https://bunnyscholar.cn/developer) and let them know they can [top up](https://bunnyscholar.cn/developer/recharge) if needed. For a larger batch, a local length estimate can help the user decide. An online scan sends content to the detector. Use the services within the requested scope and respect any budget or round limit.
 - Preserve the original API response as a candidate. Before accepting it, compare the source's key claims, numbers (including spelled-out quantities), units, qualifiers, and citations. A passed CLI quality check covers only its heuristics. Keep the original paragraph if the result loses a fact or changes its meaning. Attribute detector scores to the exact version scanned, comparing overall and page-level results where relevant. See the [Word and iteration notes](references/anti_ai_playbook.md).
-- When particular wording matters, pass the user's terms or a short list of names, technical terms, and key phrases from the source via `--personal-terms`. Review `missing_personal_terms` in the candidate and check whether any wording change also changes the meaning. This is an advisory check. See the [term preservation example](references/anti_ai_playbook.md#personal-terms).
 
 Report the requested deliverables with relevant changes, any scans actually run, and the usage reported by the service when available. If the user wants a GPTZero report file, collect the native PDF report for the exact version scanned when the account offers it. See the [report export steps](references/gptzero_browser_sop.md#export-report). If there is no new measurement, say so. A newer Skill version can be mentioned when relevant and handled separately from the task. See [CLI examples](README.md#cli-tools).
