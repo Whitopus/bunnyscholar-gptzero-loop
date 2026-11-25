@@ -31,9 +31,9 @@ flowchart LR
 ## 核心亮点 | Key Highlights
 
 - **零第三方依赖（Zero-Dependency CLI）**：`scripts/humanizer_loop.py` 100% 基于 Python 3 标准库（`zipfile`、`xml.etree.ElementTree`、`urllib`、`argparse`、`msvcrt`/`fcntl`），兼容 `python`、`python3` 与 `uv run`，新电脑无需安装 `python-docx`、`pymupdf` 或 `uv`。
-- **OpenXML 无损手术与精准高亮**：直接读写 `word/document.xml`，完整保留原有页边距、行距、字体（如 Times New Roman 12pt）、引文与 `<w:hyperlink>` 关系节点；支持 `--highlight-paras 1,2,3` 精准施加 Word 黄色荧光笔高亮。
-- **跨进程限流与自动质量门禁**：基于 `time.monotonic()` + 跨进程文件锁严格限流（默认 ≤ 20 req/s），支持 HTTP `429`/`5xx` 指数退避重试；自动拦截误夹带第一人称代词、>16 字母乱码拼接词或丢失 `[n]` 引文并自动重刷，严禁人工或 AI 二次修改返回句。
-- **安全凭据与隐私隔离**：`check-env` 绝不读取或打印 Key 明文；支持无回显终端录入 `~/.env`；内置浏览器 SOP 严守人机校验边界，绝不绕过验证码。
+- **灵活裁剪原则（Flexible by Design）**：严守 5 条不可破红线（绝不手改返回句、不泄漏 Key、不绕过人机校验、保留排版超链接、达标页冻结），其余流程高度灵活——支持纯文本轻量直调、已有分享链接直接解读、`--allow-first-person`、`--language` / `--platform` 自由切换及 `highlight_substrings` 局部涂黄。
+- **OpenXML 无损手术与精准高亮**：直接读写 `word/document.xml`，完整保留原有页边距、行距、字体（如 Times New Roman 12pt）、引文与 `<w:hyperlink>` 关系节点；支持 `--highlight-paras` 整段涂黄与 `highlight_substrings` 局部短语涂黄。
+- **跨进程限流与智能门禁**：基于 `time.monotonic()` + 跨进程文件锁严格限流（默认 ≤ 20 req/s），支持 HTTP `429`/`5xx` 指数退避重试；自动忽略 URL 与直接引语中的误报，拦截非引语第一人称、超长乱码词或丢失 `[n]` 引文并自动重刷。
 
 ---
 
@@ -41,17 +41,24 @@ flowchart LR
 
 | 子命令 (`Subcommand`) | 功能说明 (`Description`) |
 | :--- | :--- |
-| `check-env` | 静默探测 `BUNNYSCHOLAR_API_KEY`、PDF 后端（Word COM / `soffice`）及 `bunnyscholar-api` 技能 |
-| `inspect` | 解析 `.docx` 正文编号、纯词数、黄色高亮分布、引文 `[1]..[N]` 单调递增校验与第一人称检查 |
+| `check-env` | 静默探测 `BUNNYSCHOLAR_API_KEY`、PDF 后端（Word COM / `soffice`）及 `bunnyscholar-api` 前置安装 |
+| `inspect` | 解析 `.docx` 正文角色（`body_para_indices`）、硬分页、黄色高亮分布、引文 `[1]..[N]` 与第一人称（自动忽略 URL/直接引语） |
 | `snapshot` | 备份 `.docx` 至 `.snapshots/v{N}_{timestamp}.docx` 并记录 GPTZero 实测分数至 `history.json` |
 | `rollback` | 查看快照得分对比表（`--list`），恢复指定版本（`--version`）或历史最高分（`--best`） |
-| `humanize` | 限流调用 `POST /api/open/humanizer`（`en` / `gptzero` / `--dual-stage`）并执行质量门禁重刷 |
-| `apply` | 将 API 原文**一字不改**写入指定段落，支持 `--highlight-paras` 施加黄色高亮 |
+| `humanize` | 限流调用 `POST /api/open/humanizer`（支持 `--dual-stage`、`--language`、`--platform`、`--allow-first-person` 等） |
+| `apply` | 将 API 原文**一字不改**写入指定段落，支持 `--highlight-paras` 整段涂黄与 `highlight_substrings` 局部涂黄 |
 | `export-pdf` | Windows 优先 Word COM 导出（保超链接与高亮），跨平台兜底 LibreOffice `soffice`，支持 `--stage-to` |
 
 ---
 
 ## 新环境从零配置 | Quick Setup
+
+### 0. 前置安装 `bunnyscholar-api` | Prerequisite
+
+在对话中先对你的 Agent 发送以下前置指令（或确认已安装）：
+```text
+请根据 https://bunnyscholar.cn/skills/bunnyscholar-api.md，安装 bunnyscholar-api。
+```
 
 ### 1. 安装 Skill | Install the Skill
 

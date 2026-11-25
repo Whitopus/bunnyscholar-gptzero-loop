@@ -38,6 +38,7 @@ else:
 
 DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
+BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
 KEYS_URL = "https://bunnyscholar.cn/developer/keys"
 RECHARGE_URL = "https://bunnyscholar.cn/developer/recharge"
 DEFAULT_RATE_LIMIT = 20.0
@@ -538,6 +539,11 @@ def check_environment(
         },
         "setup_instructions": {
             "required": not api_found,
+            "bunnyscholar_api_prerequisite": {
+                "installed": bool(skill_info.get("found")),
+                "skill_url": BUNNYSCHOLAR_SKILL_URL,
+                "prerequisite_prompt": f"请根据 {BUNNYSCHOLAR_SKILL_URL}，安装 bunnyscholar-api。",
+            },
             "console_url": CONSOLE_URL,
             "keys_url": KEYS_URL,
             "recharge_url": RECHARGE_URL,
@@ -681,15 +687,20 @@ def extract_citations_from_text(text: str) -> Tuple[List[str], List[int]]:
     return tokens, numbers
 
 
-def detect_first_person_pronouns(text: str) -> List[str]:
-    """检测学术文本中的第一人称代词，自动过滤 'Type I' / 'I.' 等罗马数字误判及 'US'。"""
+def detect_first_person_pronouns(text: str, ignore_quotes: bool = True) -> List[str]:
+    """检测学术文本中的第一人称代词，自动过滤 URL、直接引语及 'Type I'/'I.' 等误判。"""
+    cleaned = URL_RE.sub(" ", text)
+    if ignore_quotes:
+        cleaned = re.sub(r'"[^"\n]{1,400}"', " ", cleaned)
+        cleaned = re.sub(r"\u201c[^\u201d\n]{1,400}\u201d", " ", cleaned)
+
     hits: List[str] = []
-    for match in FIRST_PERSON_RE.finditer(text):
+    for match in FIRST_PERSON_RE.finditer(cleaned):
         token = match.group(0)
         if token == "I":
             start, end = match.start(), match.end()
-            before = text[:start]
-            after = text[end:]
+            before = cleaned[:start]
+            after = cleaned[end:]
             if ROMAN_PRECEDING_WORDS_RE.search(before):
                 continue
             if after.startswith(".") or after.startswith(")"):
@@ -714,6 +725,18 @@ def extract_paragraph_info(p_elem: ET.Element, para_index: int) -> Dict[str, Any
         or p_elem.find(f".//{w_tag('fldSimple')}") is not None
     )
     has_math = any(el.tag.endswith("}oMath") or el.tag.endswith("}oMathPara") for el in p_elem.iter())
+    has_page_break_before = False
+    if ppr is not None:
+        pbb = ppr.find(w_tag("pageBreakBefore"))
+        if pbb is not None:
+            pbb_val = (pbb.get(w_tag("val")) or pbb.get("val") or "1").lower()
+            if pbb_val not in ("0", "false", "off"):
+                has_page_break_before = True
+    if not has_page_break_before:
+        for br in p_elem.findall(f".//{w_tag('br')}"):
+            if (br.get(w_tag("type")) or br.get("type") or "").lower() == "page":
+                has_page_break_before = True
+                break
 
     run_records: List[Tuple[str, Optional[str]]] = []
     text_parts: List[str] = []
@@ -756,6 +779,7 @@ def extract_paragraph_info(p_elem: ET.Element, para_index: int) -> Dict[str, Any
         "has_hyperlink": has_hyperlink,
         "has_field_codes": has_field_codes,
         "has_math": has_math,
+        "has_page_break_before": has_page_break_before,
         "highlight_colors": highlight_colors,
         "has_yellow_highlight": has_yellow_highlight,
         "all_runs_yellow": all_runs_yellow,
@@ -781,6 +805,24 @@ def inspect_docx(docx_path: Path) -> Dict[str, Any]:
         paragraphs.append(info)
         if references_start_para is None and REFERENCES_HEADING_RE.match(info["text"].strip()):
             references_start_para = idx
+
+    # 启发式标注各段落结构角色（front_matter / body / references_heading / reference_entry / heading / empty）
+    seen_body_long = False
+    for info in paragraphs:
+        p_idx = info["para_index"]
+        if info["is_empty"]:
+            info["section_role"] = "empty"
+        elif references_start_para is not None and p_idx == references_start_para:
+            info["section_role"] = "references_heading"
+        elif references_start_para is not None and p_idx > references_start_para:
+            info["section_role"] = "reference_entry"
+        elif info["is_heading"]:
+            info["section_role"] = "heading"
+        elif not seen_body_long and info["word_count"] < 35:
+            info["section_role"] = "front_matter"
+        else:
+            seen_body_long = True
+            info["section_role"] = "body"
 
     # 在参考文献章节之前校验正文中各引文编号首次出现的单调递增性
     scan_limit = (references_start_para - 1) if references_start_para is not None else len(paragraphs)
@@ -822,6 +864,8 @@ def inspect_docx(docx_path: Path) -> Dict[str, Any]:
             "total_words": sum(p["word_count"] for p in paragraphs),
             "table_count": table_count,
             "yellow_highlighted_paras": [p["para_index"] for p in paragraphs if p["has_yellow_highlight"]],
+            "body_para_indices": [p["para_index"] for p in paragraphs if p.get("section_role") == "body"],
+            "page_break_paras": [p["para_index"] for p in paragraphs if p.get("has_page_break_before")],
             "references_start_para": references_start_para,
             "citations_monotonic": citations_monotonic,
             "citations_non_decreasing": citations_non_decreasing,
@@ -937,12 +981,66 @@ def _extract_base_rpr(p_elem: ET.Element) -> Optional[ET.Element]:
     return None
 
 
+def _compute_highlight_ranges(text: str, substrings: Sequence[str]) -> List[Tuple[int, int]]:
+    """计算目标子串在 text 中的非重叠高亮区间（按出现位置合并）。"""
+    intervals: List[Tuple[int, int]] = []
+    for sub in substrings:
+        if not sub:
+            continue
+        start = 0
+        while True:
+            idx = text.find(sub, start)
+            if idx == -1:
+                break
+            intervals.append((idx, idx + len(sub)))
+            start = idx + len(sub)
+    if not intervals:
+        return []
+    intervals.sort()
+    merged: List[Tuple[int, int]] = [intervals[0]]
+    for s, e in intervals[1:]:
+        ps, pe = merged[-1]
+        if s <= pe:
+            merged[-1] = (ps, max(pe, e))
+        else:
+            merged.append((s, e))
+    return merged
+
+
+def _append_runs_for_slice(
+    container: ET.Element,
+    slice_text: str,
+    slice_offset: int,
+    rpr_template: Optional[ET.Element],
+    default_highlight: Optional[str],
+    hl_ranges: Sequence[Tuple[int, int]],
+) -> None:
+    """将文本切片按局部高亮区间拆分为 <w:r> 节点追加到 container。"""
+    if not hl_ranges or default_highlight == "yellow":
+        container.append(_build_run_element(slice_text, rpr_template, default_highlight))
+        return
+    slice_end = slice_offset + len(slice_text)
+    pos = slice_offset
+    for rs, re_pos in hl_ranges:
+        if re_pos <= pos or rs >= slice_end:
+            continue
+        if rs > pos:
+            container.append(_build_run_element(slice_text[pos - slice_offset:rs - slice_offset], rpr_template, None))
+        hl_s = max(pos, rs)
+        hl_e = min(slice_end, re_pos)
+        container.append(_build_run_element(slice_text[hl_s - slice_offset:hl_e - slice_offset], rpr_template, "yellow"))
+        pos = hl_e
+    if pos < slice_end:
+        container.append(_build_run_element(slice_text[pos - slice_offset:], rpr_template, None))
+
+
 def _replace_paragraph_preserving_structure(
     p_elem: ET.Element,
     para_index: int,
     new_text: str,
     highlight_yellow: bool,
     warnings: List[str],
+    highlight_substrings: Optional[Sequence[str]] = None,
 ) -> None:
     """无损替换单段正文，完整保留 <w:pPr>、书签/批注锚点与 <w:hyperlink r:id='...'> 关系节点。"""
     if (
@@ -986,6 +1084,13 @@ def _replace_paragraph_preserving_structure(
 
     base_rpr = _extract_base_rpr(p_elem)
     hl_color = "yellow" if highlight_yellow else None
+    hl_ranges: List[Tuple[int, int]] = []
+    if not highlight_yellow and highlight_substrings:
+        hl_ranges = _compute_highlight_ranges(new_text, highlight_substrings)
+        if not hl_ranges:
+            warn_msg = f"Paragraph {para_index}: none of highlight_substrings matched in target text."
+            warnings.append(warn_msg)
+            log_stderr(f"Warning: {warn_msg}")
 
     # 清空原段落子节点并按 OOXML 标准顺序重建
     for child in list(p_elem):
@@ -996,7 +1101,7 @@ def _replace_paragraph_preserving_structure(
         p_elem.append(anc)
 
     if not hyperlink_records:
-        p_elem.append(_build_run_element(new_text, base_rpr, hl_color))
+        _append_runs_for_slice(p_elem, new_text, 0, base_rpr, hl_color, hl_ranges)
     else:
         cursor = 0
         unmatched_links: List[Dict[str, Any]] = []
@@ -1012,18 +1117,18 @@ def _replace_paragraph_preserving_structure(
 
             if found_idx != -1:
                 if found_idx > cursor:
-                    p_elem.append(_build_run_element(new_text[cursor:found_idx], base_rpr, hl_color))
+                    _append_runs_for_slice(p_elem, new_text[cursor:found_idx], cursor, base_rpr, hl_color, hl_ranges)
                 matched_slice = new_text[found_idx:found_idx + len(anchor_text)]
                 hl_elem = ET.Element(w_tag("hyperlink"), rec["attrib"])
                 link_rpr = rec["rpr"] if rec["rpr"] is not None else base_rpr
-                hl_elem.append(_build_run_element(matched_slice, link_rpr, hl_color))
+                _append_runs_for_slice(hl_elem, matched_slice, found_idx, link_rpr, hl_color, hl_ranges)
                 p_elem.append(hl_elem)
                 cursor = found_idx + len(anchor_text)
             else:
                 unmatched_links.append(rec)
 
         if cursor < len(new_text):
-            p_elem.append(_build_run_element(new_text[cursor:], base_rpr, hl_color))
+            _append_runs_for_slice(p_elem, new_text[cursor:], cursor, base_rpr, hl_color, hl_ranges)
 
         # 兜底策略：若新文本未命中原超链接锚文本，保留零文本超链接节点以防 rId 变成孤儿关系，并显式告警
         for rec in unmatched_links:
@@ -1056,6 +1161,8 @@ def apply_humanized_to_docx(
     total_paras = len(body_paras)
 
     humanized_map: Dict[int, str] = {}
+    highlight_override_map: Dict[int, bool] = {}
+    highlight_substrings_map: Dict[int, List[str]] = {}
     for item in humanized_items:
         if not isinstance(item, dict):
             raise CliError("Each humanized entry must be a JSON object.")
@@ -1071,6 +1178,12 @@ def apply_humanized_to_docx(
         if not isinstance(new_text, str):
             raise CliError(f"Text for para_index={para_idx} must be a string.")
         humanized_map[para_idx] = new_text
+        if isinstance(item.get("highlight"), bool):
+            highlight_override_map[para_idx] = item["highlight"]
+        if isinstance(item.get("highlight_substrings"), list):
+            subs = [str(s) for s in item["highlight_substrings"] if isinstance(s, str) and s]
+            if subs:
+                highlight_substrings_map[para_idx] = subs
 
     for h_idx in sorted(highlight_paras):
         if not (1 <= h_idx <= total_paras):
@@ -1082,7 +1195,8 @@ def apply_humanized_to_docx(
     cleared_paras: List[int] = []
 
     for idx, p_elem in enumerate(body_paras, start=1):
-        want_yellow = idx in highlight_paras
+        want_yellow = highlight_override_map.get(idx, idx in highlight_paras)
+        sub_list = highlight_substrings_map.get(idx)
         if idx in humanized_map:
             _replace_paragraph_preserving_structure(
                 p_elem=p_elem,
@@ -1090,9 +1204,10 @@ def apply_humanized_to_docx(
                 new_text=humanized_map[idx],
                 highlight_yellow=want_yellow,
                 warnings=warnings,
+                highlight_substrings=sub_list,
             )
             replaced_paras.append(idx)
-            if want_yellow:
+            if want_yellow or sub_list:
                 highlighted_applied.append(idx)
         elif want_yellow:
             for r_elem in _iter_effective_runs_in_container(p_elem):
@@ -1462,26 +1577,30 @@ def check_quality_gate(
     source_text: str,
     returned_text: str,
     personal_terms: Optional[Sequence[str]] = None,
+    allow_first_person: bool = False,
+    max_word_len: int = 16,
 ) -> List[str]:
-    """执行 3 项质量门禁校验：第一人称代词、>16 字母乱码拼接词、丢失文内引文 [n]。"""
+    """执行 3 项质量门禁校验：第一人称代词、超长乱码拼接词、丢失文内引文 [n]。"""
     issues: List[str] = []
 
-    # 1. 禁止夹带第一人称代词
-    fp_hits = detect_first_person_pronouns(returned_text)
-    if fp_hits:
-        unique_fp = list(dict.fromkeys(fp_hits))
-        issues.append(f"first_person_pronoun:{','.join(unique_fp)}")
+    # 1. 第一人称代词检查（可通过 --allow-first-person 关闭）
+    if not allow_first_person:
+        fp_hits = detect_first_person_pronouns(returned_text)
+        if fp_hits:
+            unique_fp = list(dict.fromkeys(fp_hits))
+            issues.append(f"first_person_pronoun:{','.join(unique_fp)}")
 
-    # 2. 检查 >16 字母纯英文连续拼接乱码词（剔除 URL 与长度 >16 的用户白名单术语，采用词边界+大小写不敏感匹配）
+    # 2. 检查 >max_word_len 字母纯英文连续拼接乱码词（剔除 URL 与用户白名单术语）
     cleaned = URL_RE.sub(" ", returned_text)
     if personal_terms:
         for term in personal_terms:
             t = term.strip()
-            if len(t) > 16:
+            if len(t) > max_word_len:
                 prefix = r"\b" if (t[0].isalnum() or t[0] == "_") else r"(?<!\w)"
                 suffix = r"\b" if (t[-1].isalnum() or t[-1] == "_") else r"(?!\w)"
                 cleaned = re.sub(f"{prefix}{re.escape(t)}{suffix}", " ", cleaned, flags=re.IGNORECASE)
-    long_words = LONG_GARBLED_WORD_RE.findall(cleaned)
+    long_word_re = re.compile(rf"\b[A-Za-z]{{{max(1, max_word_len) + 1},}}\b")
+    long_words = long_word_re.findall(cleaned)
     if long_words:
         unique_long = list(dict.fromkeys(long_words))
         issues.append(f"garbled_long_word:{','.join(unique_long)}")
@@ -1506,12 +1625,14 @@ def call_humanizer_api(
     timeout: float,
     http_retries: int,
     personal_terms: Optional[List[str]] = None,
+    language: str = "en",
+    platform_name: str = "gptzero",
 ) -> Dict[str, Any]:
     """带跨进程限流与 429/5xx 指数退避重试的 BunnyScholar 拟人改写 API 调用函数。"""
     payload_obj: Dict[str, Any] = {
         "text": text,
-        "language": "en",
-        "platform": "gptzero",
+        "language": language,
+        "platform": platform_name,
         "needPlagiarismReduction": bool(dual_stage),
     }
     if personal_terms:
@@ -1619,6 +1740,11 @@ def run_humanize_batch(
     env_paths: Optional[Sequence[str]] = None,
     ignore_process_env: bool = False,
     allow_quality_warnings: bool = False,
+    language: str = "en",
+    platform_name: str = "gptzero",
+    allow_first_person: bool = False,
+    max_word_len: int = 16,
+    disable_quality_gate: bool = False,
 ) -> Dict[str, Any]:
     """批量对输入段落调用拟人改写 API，并强制执行计费长度预检与质量门禁重刷。"""
     api_key, key_source = _read_key_for_runtime_call(env_paths=env_paths, ignore_process_env=ignore_process_env)
@@ -1681,6 +1807,8 @@ def run_humanize_batch(
                 timeout=timeout,
                 http_retries=http_retries,
                 personal_terms=personal_terms,
+                language=language,
+                platform_name=platform_name,
             )
             # 铁律：绝对原封不动保留 API 返回的 data.text，禁止任何二次润色或字符串修饰
             api_text = resp["data"]["text"]
@@ -1689,7 +1817,18 @@ def run_humanize_batch(
             if isinstance(last_usage.get("amount"), (int, float)):
                 total_cost += float(last_usage["amount"])
 
-            issues = check_quality_gate(src_text, api_text, personal_terms=personal_terms)
+            if disable_quality_gate:
+                issues = []
+                passed = True
+                break
+
+            issues = check_quality_gate(
+                src_text,
+                api_text,
+                personal_terms=personal_terms,
+                allow_first_person=allow_first_person,
+                max_word_len=max_word_len,
+            )
             last_issues = issues
             if not issues:
                 passed = True
@@ -1717,9 +1856,12 @@ def run_humanize_batch(
     output_payload = {
         "api_url": api_url,
         "key_source": key_source,
-        "language": "en",
-        "platform": "gptzero",
+        "language": language,
+        "platform": platform_name,
         "dual_stage": bool(dual_stage),
+        "allow_first_person": bool(allow_first_person),
+        "max_word_len": int(max_word_len),
+        "quality_gate_enabled": not bool(disable_quality_gate),
         "rate_limit": rate_limit,
         "total_paragraphs": len(results),
         "passed_count": sum(1 for r in results if r["quality_passed"]),
@@ -1973,6 +2115,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit 0 even if some paragraphs fail quality gate after max retries (results remain unmodified).",
     )
+    p_hum.add_argument("--language", default="en", help="Target language for BunnyScholar humanizer (default: en).")
+    p_hum.add_argument("--platform", default="gptzero", help="Target AI detector platform (default: gptzero).")
+    p_hum.add_argument("--allow-first-person", action="store_true", help="Disable first-person pronoun check in quality gate.")
+    p_hum.add_argument("--max-word-len", type=int, default=16, help="Max allowed alphabetical word length before garbled-word trigger (default: 16).")
+    p_hum.add_argument("--disable-quality-gate", action="store_true", help="Skip quality-gate checks and retries.")
 
     # 6. apply
     p_apply = subparsers.add_parser(
@@ -2070,6 +2217,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 env_paths=args.env_paths,
                 ignore_process_env=bool(args.ignore_process_env),
                 allow_quality_warnings=bool(args.allow_quality_warnings),
+                language=args.language,
+                platform_name=args.platform,
+                allow_first_person=bool(args.allow_first_person),
+                max_word_len=args.max_word_len,
+                disable_quality_gate=bool(args.disable_quality_gate),
             )
             return 0
 

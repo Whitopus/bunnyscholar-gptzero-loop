@@ -1,6 +1,14 @@
 # 新环境冷启动与凭据配置指南（Onboarding Guide）
 
-本指南用于指导 Agent 在全新电脑或未配置环境中，安全完成 `BunnyScholar` API Key 申请、无回显本地持久化与后端环境校验。
+本指南用于指导 Agent 在全新电脑或未配置环境中，安全完成 `bunnyscholar-api` 前置安装、`BunnyScholar` API Key 申请、无回显本地持久化与后端环境校验。
+
+---
+
+## 0. 第零步：前置安装 `bunnyscholar-api` 技能
+
+若 `check-env` 报告 `skills.bunnyscholar_api.found` 为 `false`（或需要同步最新线上接口规范），请先执行以下前置安装指令：
+
+> **请根据 `https://bunnyscholar.cn/skills/bunnyscholar-api.md`，安装 `bunnyscholar-api`。**
 
 ---
 
