@@ -39,6 +39,22 @@ else:
 DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
+SKILL_VERSION = "1.1.0"
+SKILL_REPO_URL = "https://github.com/Whitopus/bunnyscholar-gptzero-loop"
+SKILL_REMOTE_RAW_BASE = "https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main"
+SKILL_REMOTE_SKILL_MD_URL = f"{SKILL_REMOTE_RAW_BASE}/SKILL.md"
+SKILL_UPDATE_FILES: Tuple[str, ...] = (
+    "SKILL.md",
+    "README.md",
+    "LICENSE",
+    ".gitignore",
+    ".env.example",
+    "scripts/humanizer_loop.py",
+    "references/onboarding_guide.md",
+    "references/gptzero_browser_sop.md",
+    "references/anti_ai_playbook.md",
+)
+UPDATE_CACHE_TTL_SECONDS = 86400
 KEYS_URL = "https://bunnyscholar.cn/developer/keys"
 RECHARGE_URL = "https://bunnyscholar.cn/developer/recharge"
 DEFAULT_RATE_LIMIT = 20.0
@@ -490,9 +506,175 @@ def detect_bunnyscholar_skill() -> Dict[str, Any]:
     return {"found": False, "path": None, "checked_paths": checked}
 
 
+def _parse_semver(ver: str) -> Tuple[int, ...]:
+    """解析语义化版本号为整数元组，便于安全比较。"""
+    nums = [int(x) for x in re.findall(r"\d+", ver)]
+    return tuple(nums) if nums else (0,)
+
+
+def _extract_frontmatter_version(text: str) -> Optional[str]:
+    """从 SKILL.md YAML frontmatter 提取 version 字段。"""
+    m = re.match(r"^\s*---\s*\r?\n(.*?)\r?\n---", text, re.DOTALL)
+    if not m:
+        return None
+    vm = re.search(r"^\s*version:\s*['\"]?([0-9]+\.[0-9]+(?:\.[0-9]+)?)['\"]?\s*$", m.group(1), re.MULTILINE)
+    return vm.group(1) if vm else None
+
+
+def check_skill_update(
+    skip: bool = False,
+    force: bool = False,
+    source_url: str = SKILL_REMOTE_SKILL_MD_URL,
+    timeout: float = 2.0,
+) -> Dict[str, Any]:
+    """轻量非阻塞版本探针（2s 超时 + 24h 临时缓存），弱网/断网时静默降级绝不阻断主流程。"""
+    skill_dir = Path(__file__).resolve().parent.parent
+    is_git = (skill_dir / ".git").is_dir()
+    update_cmd = (
+        f'git -C "{skill_dir}" pull --ff-only'
+        if is_git
+        else f'python "{Path(__file__).resolve()}" self-update --apply'
+    )
+    base: Dict[str, Any] = {
+        "current_version": SKILL_VERSION,
+        "latest_version": None,
+        "update_available": False,
+        "status": "skipped" if skip else "unknown",
+        "cached": False,
+        "install_mode": "git" if is_git else "copy",
+        "repo_url": SKILL_REPO_URL,
+        "update_command": update_cmd,
+    }
+    if skip:
+        return base
+
+    cache_path = Path(tempfile.gettempdir()) / "bunnyscholar_gptzero_loop_update_cache.json"
+    use_cache = (source_url == SKILL_REMOTE_SKILL_MD_URL) and (not force)
+    if use_cache and cache_path.is_file():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8-sig"))
+            ts = float(cached.get("checked_at", 0.0))
+            if (time.time() - ts) < UPDATE_CACHE_TTL_SECONDS and cached.get("latest_version"):
+                latest = str(cached["latest_version"])
+                avail = _parse_semver(latest) > _parse_semver(SKILL_VERSION)
+                base.update({
+                    "latest_version": latest,
+                    "update_available": avail,
+                    "status": "update_available" if avail else "up_to_date",
+                    "cached": True,
+                })
+                return base
+        except Exception:
+            pass
+
+    try:
+        req = urllib.request.Request(source_url, headers={"User-Agent": f"bunnyscholar-gptzero-loop/{SKILL_VERSION}"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content = resp.read(8192).decode("utf-8", errors="replace")
+        latest = _extract_frontmatter_version(content)
+        if not latest:
+            base["status"] = "unreachable"
+            return base
+        avail = _parse_semver(latest) > _parse_semver(SKILL_VERSION)
+        base.update({
+            "latest_version": latest,
+            "update_available": avail,
+            "status": "update_available" if avail else "up_to_date",
+            "cached": False,
+        })
+        if use_cache:
+            try:
+                cache_path.write_text(
+                    json.dumps({"checked_at": time.time(), "latest_version": latest}),
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
+        return base
+    except Exception:
+        base["status"] = "unreachable"
+        return base
+
+
+def self_update_skill(
+    apply_changes: bool = False,
+    skill_dir: Optional[Path] = None,
+    raw_base: str = SKILL_REMOTE_RAW_BASE,
+    timeout: float = 15.0,
+) -> Dict[str, Any]:
+    """安全更新本地 Skill（Git 目录走 git pull --ff-only，非 Git 目录按静态白名单原子覆盖）。"""
+    target_dir = (skill_dir if skill_dir else Path(__file__).resolve().parent.parent).resolve()
+    is_git = (target_dir / ".git").is_dir()
+    mode = "git_pull" if is_git else "http_raw_whitelist"
+
+    if not apply_changes:
+        probe = check_skill_update(skip=False, force=True, source_url=f"{raw_base.rstrip('/')}/SKILL.md")
+        return {
+            "dry_run": True,
+            "skill_dir": str(target_dir),
+            "mode": mode,
+            "current_version": SKILL_VERSION,
+            "latest_version": probe.get("latest_version"),
+            "update_available": probe.get("update_available", False),
+            "status": probe.get("status"),
+            "note": "Re-run with --apply to perform the update.",
+        }
+
+    if is_git:
+        proc = subprocess.run(
+            ["git", "-C", str(target_dir), "pull", "--ff-only"],
+            capture_output=True,
+            text=True,
+            timeout=int(max(10, timeout)),
+        )
+        if proc.returncode != 0:
+            raise CliError(f"git pull --ff-only failed: {(proc.stderr or proc.stdout).strip()}")
+        return {
+            "dry_run": False,
+            "updated": True,
+            "skill_dir": str(target_dir),
+            "mode": mode,
+            "git_output": (proc.stdout or proc.stderr).strip(),
+        }
+
+    base_clean = raw_base.rstrip("/")
+    downloaded: Dict[str, bytes] = {}
+    for rel in SKILL_UPDATE_FILES:
+        url = f"{base_clean}/{rel}"
+        req = urllib.request.Request(url, headers={"User-Agent": f"bunnyscholar-gptzero-loop/{SKILL_VERSION}"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read()
+        if not data:
+            raise CliError(f"Downloaded empty content from {url}; aborting update.")
+        downloaded[rel] = data
+
+    updated_files: List[str] = []
+    for rel, data in downloaded.items():
+        dst = target_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp_dst = dst.with_name(f".tmp_{dst.name}_{os.getpid()}")
+        tmp_dst.write_bytes(data)
+        os.replace(tmp_dst, dst)
+        updated_files.append(rel)
+
+    new_ver = _extract_frontmatter_version(downloaded["SKILL.md"].decode("utf-8", errors="replace"))
+    return {
+        "dry_run": False,
+        "updated": True,
+        "skill_dir": str(target_dir),
+        "mode": mode,
+        "previous_version": SKILL_VERSION,
+        "latest_version": new_ver,
+        "updated_files": updated_files,
+    }
+
+
 def check_environment(
     env_paths: Optional[Sequence[str]] = None,
     ignore_process_env: bool = False,
+    skip_update_check: bool = False,
+    force_update_check: bool = False,
+    update_source_url: str = SKILL_REMOTE_SKILL_MD_URL,
 ) -> Dict[str, Any]:
     """执行完整环境探测，返回绝对不含任何敏感 Key 明文的结构化报告。"""
     sources_checked: List[Dict[str, Any]] = []
@@ -533,6 +715,11 @@ def check_environment(
         preferred_pdf_backend = "libreoffice"
 
     skill_info = detect_bunnyscholar_skill()
+    update_info = check_skill_update(
+        skip=skip_update_check,
+        force=force_update_check,
+        source_url=update_source_url,
+    )
 
     return {
         "platform": {
@@ -570,6 +757,7 @@ def check_environment(
         "skills": {
             "bunnyscholar_api": skill_info,
         },
+        "update": update_info,
     }
 
 
@@ -2064,6 +2252,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ignore BUNNYSCHOLAR_API_KEY from current process environment (useful for isolated testing).",
     )
+    p_check.add_argument("--skip-update-check", action="store_true", help="Skip remote version check.")
+    p_check.add_argument("--force-update-check", action="store_true", help="Bypass 24h cache for remote version check.")
+    p_check.add_argument("--update-source-url", default=SKILL_REMOTE_SKILL_MD_URL, help="Override remote SKILL.md URL for version check.")
     p_check.add_argument("--output", default=None, help="Optional path to write UTF-8 JSON report.")
 
     # 2. inspect
@@ -2157,6 +2348,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pdf.add_argument("--output", default=None, help="Optional path to write UTF-8 JSON report.")
 
+    # 8. self-update
+    p_upd = subparsers.add_parser(
+        "self-update",
+        help="Check or apply a safe update for this skill (git pull --ff-only or static whitelist download).",
+    )
+    p_upd.add_argument("--apply", action="store_true", help="Apply update (default is dry-run version check).")
+    p_upd.add_argument("--skill-dir", default=None, help="Override target skill directory.")
+    p_upd.add_argument("--raw-base", default=SKILL_REMOTE_RAW_BASE, help="Override remote raw base URL.")
+    p_upd.add_argument("--timeout", type=float, default=15.0, help="Download/git timeout in seconds (default: 15.0).")
+    p_upd.add_argument("--output", default=None, help="Optional path to write UTF-8 JSON report.")
+
     return parser
 
 
@@ -2175,6 +2377,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = check_environment(
                 env_paths=args.env_paths,
                 ignore_process_env=bool(args.ignore_process_env),
+                skip_update_check=bool(args.skip_update_check),
+                force_update_check=bool(args.force_update_check),
+                update_source_url=args.update_source_url,
             )
             emit_result(result, args.output)
             return 0
@@ -2254,6 +2459,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 pdf_path=Path(args.pdf) if args.pdf else None,
                 backend=args.backend,
                 stage_to=Path(args.stage_to) if args.stage_to else None,
+            )
+            emit_result(result, args.output)
+            return 0
+
+        if args.command == "self-update":
+            result = self_update_skill(
+                apply_changes=bool(args.apply),
+                skill_dir=Path(args.skill_dir) if args.skill_dir else None,
+                raw_base=args.raw_base,
+                timeout=args.timeout,
             )
             emit_result(result, args.output)
             return 0

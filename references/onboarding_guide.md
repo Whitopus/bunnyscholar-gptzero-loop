@@ -69,3 +69,10 @@
 1. **期望达标线**：总体/每页希望 AI 率低于多少（默认 `Human >= 85%` / `AI <= 15%`）？
 2. **第一人称限制**：是否禁止出现 `I/we/our`（反思或工科论文可开启 `--allow-first-person`）？
 3. **Word 高亮要求**：是否需要为修订段落或局部短语施加黄色荧光笔高亮？
+
+---
+
+## 5. 版本检查与安全更新
+
+- `check-env` 会以 **2 秒超时 + 24 小时临时缓存**非阻塞检查远程版本（弱网/断网自动跳过，绝不卡顿）。
+- 若发现新版本（`update.update_available == true`），请先征得用户同意，再按安装方式执行 `git -C <skill_dir> pull --ff-only` 或 `python scripts/humanizer_loop.py self-update --apply`（绝不触碰 `~/.env` 与用户文档）。

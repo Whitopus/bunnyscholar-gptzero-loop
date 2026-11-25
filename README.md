@@ -149,6 +149,13 @@ python scripts/humanizer_loop.py check-env --output env_status.json
 | `humanize` | 跨进程限流调用 Bunny学术拟人接口（支持 `--dual-stage`、`--language`、`--platform`、`--allow-first-person`） |
 | `apply` | 将接口返回原文**一字不改**写回 Word，支持整段涂黄（`--highlight-paras`）与局部短语涂黄（`highlight_substrings`） |
 | `export-pdf` | Windows 优先 Word COM 导出（完整保留超链接与黄色高亮），其他系统自动兜底 LibreOffice |
+| `self-update` | 一键安全升级本 Skill（Git 目录自动 `git pull --ff-only`，非 Git 目录按白名单更新，绝不碰个人文件） |
+
+### 🔄 如何保持 Skill 为最新版本？
+
+`check-env` 内置了轻量非阻塞更新探针（2 秒超时 + 24 小时缓存，断网不影响使用）。发现新版时 AI 助手会提醒你，你也可以随时说一句 **“帮我更新 `bunnyscholar-gptzero-loop`”** 或手动执行：
+- **`git clone` 安装的用户**：`git -C ~/.gemini/config/skills/bunnyscholar-gptzero-loop pull --ff-only`
+- **手动复制/解压安装的用户**：`python ~/.gemini/config/skills/bunnyscholar-gptzero-loop/scripts/humanizer_loop.py self-update --apply`
 
 <details>
 <summary>点击查看项目目录结构</summary>
@@ -216,6 +223,12 @@ Lowering AI-detection scores on academic papers often turns into a frustrating g
    ```bash
    python scripts/humanizer_loop.py check-env --output env_status.json
    ```
+
+### How to Update
+
+`check-env` includes a non-blocking version probe (2s timeout, 24h cache). When an update is available, your agent will ask before upgrading, or you can run:
+- **Git install**: `git -C ~/.gemini/config/skills/bunnyscholar-gptzero-loop pull --ff-only`
+- **Copied install**: `python ~/.gemini/config/skills/bunnyscholar-gptzero-loop/scripts/humanizer_loop.py self-update --apply`
 
 ---
 

@@ -1,5 +1,8 @@
 ---
 name: bunnyscholar-gptzero-loop
+version: 1.1.0
+source: https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main/SKILL.md
+repo: https://github.com/Whitopus/bunnyscholar-gptzero-loop
 description: >-
   Bunny学术（BunnyScholar）拟人改写 API 与 GPTZero 内置浏览器自检降 AI 率闭环工作流。
   支持零第三方依赖 Python 标准库 CLI、OpenXML 无损读写与指定段落/局部子串黄色高亮、
@@ -69,7 +72,8 @@ description: >-
 
 | 子命令 | 核心作用 | 关键参数示例 |
 | :--- | :--- | :--- |
-| `check-env` | 静默探测 `BUNNYSCHOLAR_API_KEY`、PDF 后端与 `bunnyscholar-api` 前置安装 | `[--env-paths ...] [--ignore-process-env] [--output env.json]` |
+| `check-env` | 静默探测 `BUNNYSCHOLAR_API_KEY`、PDF 后端、`bunnyscholar-api` 与远程版本（2s 超时/24h 缓存） | `[--skip-update-check \| --force-update-check] [--output env.json]` |
+| `self-update` | 安全更新本技能（Git 目录走 `git pull --ff-only`，非 Git 目录按白名单下载） | `[--apply] [--output update.json]` |
 | `inspect` | 解析 `.docx` 正文角色（`body_para_indices`）、硬分页（`page_break_paras`）、高亮、引文与第一人称（自动忽略 URL 与直接引语） | `--docx paper.docx [--output inspect.json]` |
 | `snapshot` | 备份当前 `.docx` 至 `.snapshots/v{N}_{timestamp}.docx` 并记录实测得分 | `--docx paper.docx [--overall-human 96] [--pages "1=99,2=98"] [--note "..."]` |
 | `rollback` | 查看历史得分对比表，或回滚至指定版本 / 历史最高分快照 | `--docx paper.docx (--list \| --version 2 \| --best)` |
@@ -92,7 +96,7 @@ description: >-
 
 ## Workflow
 
-1. **前置、环境检查与目标基准确认**：确保已按 `https://bunnyscholar.cn/skills/bunnyscholar-api.md` 安装 `bunnyscholar-api` 并完成 `check-env`；缺失 Key 时按 [onboarding_guide.md](./references/onboarding_guide.md) 引导无回显写入 `~/.env`。**开工前轻问一轮用户的期望 AI 率基准**（例如总体/每页希望 AI 率低于多少%，如 `AI <= 15%` / `Human >= 85%` 或更严格的全绿 `>= 90%`，以及是否允许第一人称、是否需要局部涂黄；用户已明确或选择默认时直接按 `Human >= 85%` 推进）。
+1. **前置、环境检查、更新提示与目标基准确认**：确保已按 `https://bunnyscholar.cn/skills/bunnyscholar-api.md` 安装 `bunnyscholar-api` 并完成 `check-env`；若 `update.update_available` 为 `true`，礼貌询问用户是否运行 `self-update --apply`（或 `git pull --ff-only`）升级后再继续（绝不静默自改代码）；缺失 Key 时按 [onboarding_guide.md](./references/onboarding_guide.md) 引导无回显写入 `~/.env`。**开工前轻问一轮用户的期望 AI 率基准**（例如总体/每页希望 AI 率低于多少%，如 `AI <= 15%` / `Human >= 85%` 或更严格的全绿 `>= 90%`，以及是否允许第一人称、是否需要局部涂黄；用户已明确或选择默认时直接按 `Human >= 85%` 推进）。
 2. **基线快照与首轮测试**：对 `.docx` 执行 `inspect`（读取 `summary.body_para_indices` 区分页眉元信息与正文段号）与 `snapshot`；若用户尚未提供报告，使用 `export-pdf --stage-to` 并按 [gptzero_browser_sop.md](./references/gptzero_browser_sop.md) 获取 `Page by page scan` 基线。
 3. **分页冻结与源稿预处理**：“先一后二”——先在源稿修正错词、人称、逻辑、生硬分号与 Peer Review 语法，顽固页剥离 AI 八股连接词（详见 [anti_ai_playbook.md](./references/anti_ai_playbook.md)）。**`Human >= 85%` 或纯白的页面/段落坚决冻结不动**。
 4. **拟人改写、实时报费与语义体检**：仅对未达标段落调用 `humanize`（顽固页升档 `--dual-stage`）。**每轮调用结束后主动向用户汇报本轮实际扣费**（读取输出 JSON 中的 `total_usage_amount`，如 `¥0.229 CNY`）与门禁重刷次数。脚本自动执行质量门禁后，Agent 仍应快速通读返回文本检查是否存在语义反意（如把“焦虑”改反）；若有，只能改源稿重调或重刷，**绝不手改**。
