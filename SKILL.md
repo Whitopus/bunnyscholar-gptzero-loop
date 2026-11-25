@@ -1,6 +1,6 @@
 ---
 name: bunnyscholar-gptzero-loop
-version: 1.1.0
+version: 1.2.0
 source: https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main/SKILL.md
 repo: https://github.com/Whitopus/bunnyscholar-gptzero-loop
 description: >-
@@ -113,7 +113,7 @@ description: >-
 2. **顽固段落迭代复盘**：明确指出哪几段改了多轮、反复原因（如八股模板 / 语义反意 / 孤页）、最终破局方式与保留快照版本。
 3. **GPTZero 额度耗费**：初始与最终剩余 credits、总扫描轮次（文本框快测 vs PDF 分页终检）、是否触发换号。
 4. **BunnyScholar API 耗费**：每轮及累计调用次数、门禁重刷次数、累计真实扣费金额（元 CNY）。
-5. **交付物路径与勿手改提醒**：最终 `.docx`/`.pdf` 路径、最佳快照号与回滚命令，并提醒成品直接提交、严禁手改标点或润色。
+5. **交付物路径、报告 PDF 与勿手改提醒**：最终 `.docx`/`.pdf` 路径、**最终版对应的 GPTZero 原生 PDF 检测报告**（在结果页点击 `Export` 导出并归档交付，受限时降级为分享链接 + 分页截图，按需附带）、最佳快照号与回滚命令，并提醒成品直接提交、严禁手改标点或润色。
 
 ## Rate Limiting
 

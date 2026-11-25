@@ -39,7 +39,7 @@ else:
 DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
-SKILL_VERSION = "1.1.0"
+SKILL_VERSION = "1.2.0"
 SKILL_REPO_URL = "https://github.com/Whitopus/bunnyscholar-gptzero-loop"
 SKILL_REMOTE_RAW_BASE = "https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main"
 SKILL_REMOTE_SKILL_MD_URL = f"{SKILL_REMOTE_RAW_BASE}/SKILL.md"

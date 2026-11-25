@@ -61,3 +61,13 @@ Agent **必须立即暂停**，向用户清晰汇报当前剩余额度/报错状
 > “当前 GPTZero 账号额度已耗尽或触发限制，请问您是否需要在内置浏览器窗口中退出并切换登录另一个 GPTZero 账号（或改用仅剩的免费模式）？”
 
 若用户选择换号，交由用户在可见窗口手动退出重登（并完成可能出现的新验证码）；用户确认后，Agent 再次通过 `send_message` 复用同一浏览器会话无缝恢复检测。
+
+---
+
+## 5. 终检交付：导出 GPTZero 原生 PDF 报告
+
+- **免费导出原生报告（避开 `/batches/...` 无响应陷阱）**：
+  - 注意：上传 PDF 后默认进入的 `/batches/...` 批次页右上角 `Export` / `Share` 按钮可能无响应（no-op）。
+  - **正确路径**：点击左侧导航栏 **`Scans`**（`/documents-history`）打开对应文档进入单文档路由 `/documents/<docId>?scanType=basic`，然后点击右上角 **`Export`** ➔ 在 `Download PDF Report` 弹窗点击 **`Download PDF`**，即可免费下载原生 PDF 报告（落盘至浏览器沙箱 `downloads/` 目录）。
+- **归档交付**：将 `downloads/` 中新生成的 `GPTZero_*.pdf` 复制归档至用户目标交付目录（建议命名 `<原文件名>_gptzero_report.pdf`），随最终 `.docx` / `.pdf` 一并交付。
+- **降级兜底**：若因页面改版或网络异常导致 `Export` 失败，自动降级为附上 **Share 分享链接（单文档 `Share` ➔ 开启 `Link sharing is on`）+ `Basic Scan` 分页截图**，不阻塞最终交付。

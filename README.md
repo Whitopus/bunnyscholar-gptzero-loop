@@ -59,7 +59,7 @@
 | **手改一两句就反弹** | 接口返回文本**一字不改**直写回 Word；发现语义不对只改源稿或重刷，绝不手改成品 |
 | **传文件总弹确认、烧额度** | **双轨检测**：单段迭代走首页文本框快测（免上传弹窗、极省 credits）；仅首尾才传 PDF 看分页 |
 | **GPTZero 广告弹窗烦人** | 自动连环关掉 3 层试用/折扣/插件广告弹窗并切回免费 `Basic Scan (Model 5.0b)`，不打扰用户 |
-| **改完不知道花了多少** | 每轮实时报扣费，结束时自动汇总**透明战报**（整体/每页 AI 率、顽固段复盘、双平台花费） |
+| **改完不知道花了多少** | 每轮实时报扣费，结束时自动汇总**透明战报**（整体/每页 AI 率、顽固段复盘、双平台花费），**并可一键 `Export` 附上最终版 GPTZero 原生 PDF 检测报告** |
 | **担心泄漏论文或密钥** | `.gitignore` 默认屏蔽 `.env` 与所有 `.docx`/`.pdf`；探针绝不读明文 Key；绝不绕过人机验证 |
 
 ### 闭环怎么跑？
@@ -199,7 +199,7 @@ Lowering AI-detection scores on academic papers often turns into a frustrating g
 - **No Accidental Post-Edits**: Writes API outputs back verbatim without LLM paraphrasing, preventing sudden AI-score spikes.
 - **Dual-Track Scanning**: Uses homepage paste-scanning for fast single-paragraph checks (no repeated file-upload prompts, minimal credit burn) and reserves full PDF uploads for baseline and final page-by-page verification.
 - **Auto-Dismisses Promo Modals**: Automatically closes GPTZero's multi-step upgrade/extension popups and switches to free `Basic Scan (Model 5.0b)`.
-- **Transparent Final Report**: Reports per-round cost and summarizes overall/page/paragraph score changes, stubborn-paragraph retries, GPTZero credits used, and exact BunnyScholar API cost.
+- **Transparent Final Report**: Reports per-round cost, summarizes overall/page/paragraph score changes, stubborn-paragraph retries, GPTZero credits used, and exact BunnyScholar API cost, and can attach the native GPTZero PDF report via `Export`.
 - **Privacy First**: `.gitignore` blocks `.env`, `.docx`, `.pdf`, and `.snapshots/`; never echoes API keys or bypasses CAPTCHAs.
 
 ### Quick Start
