@@ -1237,10 +1237,10 @@ def apply_humanized_to_docx(
 
 
 def _load_humanized_items(json_path: Path) -> List[Dict[str, Any]]:
-    """读取并兼容解析 humanize 输出或待应用段落 JSON。"""
+    """读取并兼容解析 humanize 输出或待应用段落 JSON（支持 UTF-8 BOM）。"""
     if not json_path.is_file():
         raise CliError(f"JSON input file not found: {json_path}")
-    with json_path.open("r", encoding="utf-8") as f:
+    with json_path.open("r", encoding="utf-8-sig") as f:
         payload = json.load(f)
     if isinstance(payload, list):
         return payload
@@ -1294,11 +1294,11 @@ def _parse_pages_arg(raw: Optional[str]) -> Optional[Any]:
 
 
 def _load_snapshot_history(snap_dir: Path, docx_name: str) -> Dict[str, Any]:
-    """读取快照目录的 history.json；若不存在则初始化空历史结构。"""
+    """读取快照目录的 history.json；若不存在则初始化空历史结构（支持 UTF-8 BOM）。"""
     history_path = snap_dir / "history.json"
     if not history_path.is_file():
         return {"docx_name": docx_name, "next_version": 1, "snapshots": []}
-    with history_path.open("r", encoding="utf-8") as f:
+    with history_path.open("r", encoding="utf-8-sig") as f:
         data = json.load(f)
     if not isinstance(data, dict) or not isinstance(data.get("snapshots"), list):
         raise CliError(f"Corrupted snapshot history file: {history_path}")

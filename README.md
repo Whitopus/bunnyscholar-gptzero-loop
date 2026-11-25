@@ -31,8 +31,8 @@ flowchart LR
 ## 核心亮点 | Key Highlights
 
 - **零第三方依赖（Zero-Dependency CLI）**：`scripts/humanizer_loop.py` 100% 基于 Python 3 标准库（`zipfile`、`xml.etree.ElementTree`、`urllib`、`argparse`、`msvcrt`/`fcntl`），兼容 `python`、`python3` 与 `uv run`，新电脑无需安装 `python-docx`、`pymupdf` 或 `uv`。
-- **灵活裁剪原则（Flexible by Design）**：严守 5 条不可破红线（绝不手改返回句、不泄漏 Key、不绕过人机校验、保留排版超链接、达标页冻结），其余流程高度灵活——支持纯文本轻量直调、已有分享链接直接解读、`--allow-first-person`、`--language` / `--platform` 自由切换及 `highlight_substrings` 局部涂黄。
-- **OpenXML 无损手术与精准高亮**：直接读写 `word/document.xml`，完整保留原有页边距、行距、字体（如 Times New Roman 12pt）、引文与 `<w:hyperlink>` 关系节点；支持 `--highlight-paras` 整段涂黄与 `highlight_substrings` 局部短语涂黄。
+- **灵活裁剪原则（Flexible by Design）**：严守 5 条不可破红线（绝不手改返回句、不泄漏 Key、不绕过人机校验、保留排版超链接、达标页冻结），其余流程高度灵活——支持纯文本轻量直调、双轨检测（局部文本框粘贴快测免上传确认弹窗 + 首尾 PDF 分页验收）、`--allow-first-person`、`--language` / `--platform` 自由切换及 `highlight_substrings` 局部涂黄。
+- **OpenXML 无损手术与透明战报**：直接读写 `word/document.xml`，完整保留原有页边距、行距、字体（如 Times New Roman 12pt）、引文与 `<w:hyperlink>` 关系节点；支持 UTF-8 BOM JSON 兼容；闭环结束自动汇总整体/逐页/逐段 AI 率、顽固段复盘与双平台额度成本对账。
 - **跨进程限流与智能门禁**：基于 `time.monotonic()` + 跨进程文件锁严格限流（默认 ≤ 20 req/s），支持 HTTP `429`/`5xx` 指数退避重试；自动忽略 URL 与直接引语中的误报，拦截非引语第一人称、超长乱码词或丢失 `[n]` 引文并自动重刷。
 
 ---

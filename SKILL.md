@@ -97,7 +97,18 @@ description: >-
 3. **分页冻结与源稿预处理**：“先一后二”——先在源稿修正错词、人称、逻辑、生硬分号与 Peer Review 语法，顽固页剥离 AI 八股连接词（详见 [anti_ai_playbook.md](./references/anti_ai_playbook.md)）。**`Human >= 85%` 或纯白的页面/段落坚决冻结不动**。
 4. **拟人改写与语义体检**：仅对未达标段落调用 `humanize`（顽固页升档 `--dual-stage`）。脚本自动执行质量门禁后，Agent 仍应快速通读返回文本检查是否存在语义反意（如把“焦虑”改反）；若有，只能改源稿重调或重刷，**绝不手改**。
 5. **原样落盘与精准涂黄**：调用 `apply` 一字不改写入 `.docx`（整段修订用 `--highlight-paras`，局部微调在 JSON 中传 `highlight_substrings`）。
-6. **复测、快照与最优回滚**：再次 `export-pdf` 并复用同一 `browser` Subagent 会话复测 GPTZero，随即执行 `snapshot`。若得分退步，立即 `rollback --best` 恢复历史最高分。
+6. **复测、快照与最优回滚**：
+   - 局部单段迭代优先复用同一 `browser` Subagent 会话，在 GPTZero 首页**纯文本框粘贴快测**（零上传确认弹窗、极省 credits）；仅在首轮基线与最终交付验收时 `export-pdf` 上传整篇 PDF 获取 `Page by page scan` 分页得分（若遇 `Advanced` 假 429 试用弹窗，关掉弹窗切回 `Basic Scan` 即可）。
+   - 随即执行 `snapshot` 记录新得分；若退步，立即 `rollback --best` 恢复历史最高分。
+
+## Final Delivery Report（最终交付战报清单）
+
+闭环全部完成后，建议向用户呈现清晰透明的 5 维度战报（灵活组织，不僵化）：
+1. **最终版 AI 率全览**：整体结论与三维概率（`Human% / Mixed% / AI%` 对比基线）、逐页 `Page by page scan` 得分表、各正文段标黄与作业高亮核验。
+2. **顽固段落迭代复盘**：明确指出哪几段改了多轮、反复原因（如八股模板 / 语义反意 / 孤页）、最终破局方式与保留快照版本。
+3. **GPTZero 额度耗费**：初始与最终剩余 credits、总扫描轮次（文本框快测 vs PDF 分页终检）、是否触发换号。
+4. **BunnyScholar API 耗费**：总调用次数、门禁重刷次数、累计真实扣费金额（元 CNY）。
+5. **交付物路径与勿手改提醒**：最终 `.docx`/`.pdf` 路径、最佳快照号与回滚命令，并提醒成品直接提交、严禁手改标点或润色。
 
 ## Rate Limiting
 
