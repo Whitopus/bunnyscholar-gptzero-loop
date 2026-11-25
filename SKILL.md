@@ -40,7 +40,7 @@ description: >-
 
 ## Quick Start
 
-1. **前置确认与静默探针**（若未装 `bunnyscholar-api`，先按上方前置提示安装）：
+1. **前置确认与静默探针**（若未装 `bunnyscholar-api`，先按上方前置提示安装；在论文工作目录运行时请使用 Skill 目录下的脚本绝对路径，macOS/Linux 可使用 `python3`；即使无 Word/LibreOffice 仍可用纯文本框快测降 AI）：
    ```bash
    python scripts/humanizer_loop.py check-env --output env_status.json
    ```

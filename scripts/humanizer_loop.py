@@ -112,9 +112,9 @@ POWERSHELL_KEY_SETUP_CMD = (
     "try { "
     "$v = [Runtime.InteropServices.Marshal]::PtrToStringAuto($b); "
     '$p = Join-Path $HOME ".env"; '
-    'if ((Test-Path $p) -and ((Get-Content -Raw $p) -notmatch "(\\r?\\n)$")) { '
-    'Add-Content -Path $p -Value "" -Encoding UTF8 }; '
-    'Add-Content -Path $p -Value "BUNNYSCHOLAR_API_KEY=$v" -Encoding UTF8; '
+    "$enc = [System.Text.UTF8Encoding]::new($false); "
+    '$pre = if ((Test-Path $p) -and ([System.IO.File]::ReadAllText($p) -notmatch "(\\r?\\n)$")) { "`n" } else { "" }; '
+    '[System.IO.File]::AppendAllText($p, "${pre}BUNNYSCHOLAR_API_KEY=$v`n", $enc); '
     'Write-Host "Saved to $p" '
     "} finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }"
 )
@@ -306,8 +306,8 @@ def serialize_document_xml(root: ET.Element, root_namespaces: Sequence[Tuple[str
 # ==============================================================================
 
 def _parse_dotenv_key_from_line(line: str, key_name: str) -> Optional[str]:
-    """解析单行 .env 定义中的指定变量值；未匹配返回 None。"""
-    s = line.strip()
+    """解析单行 .env 定义中的指定变量值（自动剥离 UTF-8 BOM）；未匹配返回 None。"""
+    s = line.lstrip("\ufeff").strip()
     if not s or s.startswith("#"):
         return None
     if s.startswith("export ") or s.startswith("export\t"):
@@ -326,7 +326,7 @@ def probe_env_file_for_key(env_path: Path, key_name: str = "BUNNYSCHOLAR_API_KEY
     if not env_path.is_file():
         return False
     found = False
-    with env_path.open("r", encoding="utf-8", errors="replace") as f:
+    with env_path.open("r", encoding="utf-8-sig", errors="replace") as f:
         for line in f:
             val = _parse_dotenv_key_from_line(line, key_name)
             if val is not None:
@@ -349,7 +349,7 @@ def _read_key_for_runtime_call(
         if not env_file.is_file():
             continue
         matched_val: Optional[str] = None
-        with env_file.open("r", encoding="utf-8", errors="replace") as f:
+        with env_file.open("r", encoding="utf-8-sig", errors="replace") as f:
             for line in f:
                 parsed = _parse_dotenv_key_from_line(line, "BUNNYSCHOLAR_API_KEY")
                 if parsed is not None:
@@ -468,12 +468,20 @@ def detect_libreoffice() -> Dict[str, Any]:
 
 
 def detect_bunnyscholar_skill() -> Dict[str, Any]:
-    """探测全局安装或插件内置的 bunnyscholar-api 技能是否存在。"""
+    """探测全局安装、插件内置及主流客户端（Antigravity/Claude Code/Codex/Gemini CLI/OpenCode）的 bunnyscholar-api 技能。"""
     home = Path.home()
+    cwd = Path.cwd()
     candidates = [
         home / ".gemini" / "config" / "skills" / "bunnyscholar-api" / "SKILL.md",
         home / ".gemini" / "config" / "plugins" / "bunnyscholar-api" / "skills" / "bunnyscholar-api" / "SKILL.md",
         home / ".gemini" / "config" / "plugins" / "bunnyscholar-api" / "SKILL.md",
+        home / ".claude" / "skills" / "bunnyscholar-api" / "SKILL.md",
+        home / ".agents" / "skills" / "bunnyscholar-api" / "SKILL.md",
+        home / ".gemini" / "skills" / "bunnyscholar-api" / "SKILL.md",
+        home / ".config" / "opencode" / "skills" / "bunnyscholar-api" / "SKILL.md",
+        cwd / ".agents" / "skills" / "bunnyscholar-api" / "SKILL.md",
+        cwd / ".claude" / "skills" / "bunnyscholar-api" / "SKILL.md",
+        cwd / ".gemini" / "skills" / "bunnyscholar-api" / "SKILL.md",
     ]
     checked = [str(p) for p in candidates]
     for p in candidates:
