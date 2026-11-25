@@ -10,7 +10,7 @@
 [![Python 3 Stdlib Only](https://img.shields.io/badge/Python-3%20Stdlib%20Only-brightgreen?style=flat-square)](#)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-success?style=flat-square)](#)
 [![Agent Skill](https://img.shields.io/badge/Skill-Antigravity%20%7C%20Claude%20Code%20%7C%20Codex-orange?style=flat-square)](./SKILL.md)
-[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=<your-org>.bunnyscholar-gptzero-loop)](https://github.com/<your-org>/bunnyscholar-gptzero-loop)
+[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Whitopus.bunnyscholar-gptzero-loop)](https://github.com/Whitopus/bunnyscholar-gptzero-loop)
 
 **跳转导航：**
 [简体中文](#简体中文) ·
@@ -94,15 +94,15 @@ flowchart LR
 
 - **Google Antigravity（全局安装）**：
   ```bash
-  git clone https://github.com/<your-org>/bunnyscholar-gptzero-loop.git ~/.gemini/config/skills/bunnyscholar-gptzero-loop
+  git clone https://github.com/Whitopus/bunnyscholar-gptzero-loop.git ~/.gemini/config/skills/bunnyscholar-gptzero-loop
   ```
 - **Claude Code（全局安装）**：
   ```bash
-  git clone https://github.com/<your-org>/bunnyscholar-gptzero-loop.git ~/.claude/skills/bunnyscholar-gptzero-loop
+  git clone https://github.com/Whitopus/bunnyscholar-gptzero-loop.git ~/.claude/skills/bunnyscholar-gptzero-loop
   ```
 - **Codex / 通用项目级（`.agents/skills/`）**：
   ```bash
-  git clone https://github.com/<your-org>/bunnyscholar-gptzero-loop.git .agents/skills/bunnyscholar-gptzero-loop
+  git clone https://github.com/Whitopus/bunnyscholar-gptzero-loop.git .agents/skills/bunnyscholar-gptzero-loop
   ```
 
 </details>
@@ -205,7 +205,7 @@ Lowering AI-detection scores on academic papers often turns into a frustrating g
 2. **Clone into Your Agent's Skills Directory**:
    ```bash
    # Google Antigravity
-   git clone https://github.com/<your-org>/bunnyscholar-gptzero-loop.git ~/.gemini/config/skills/bunnyscholar-gptzero-loop
+   git clone https://github.com/Whitopus/bunnyscholar-gptzero-loop.git ~/.gemini/config/skills/bunnyscholar-gptzero-loop
    ```
 3. **Save Your API Key Safely** (get a key at `https://bunnyscholar.cn/developer`, never paste it in chat; hidden typing shows nothing—just paste and press `Enter`):
    ```bash
