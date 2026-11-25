@@ -5,7 +5,7 @@
 
 # BunnyScholar × GPTZero Loop
 
-用 BunnyScholar 改写指定段落，按需复核 GPTZero 报告，把选定的改动写回 Word。
+面向 AI Agent 的 Bunny学术（BunnyScholar）× GPTZero 降 AI 率助手：段落改写、报告复核导出、无损写回 Word
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](#install)
