@@ -1,0 +1,18 @@
+# 环境变量与密钥（严禁提交任何真实 API Key）
+.env
+.env.*
+!.env.example
+
+# 论文与工作快照产物（保护个人文档与隐私数据）
+.snapshots/
+*.docx
+*.pdf
+*_log.json
+
+# Python 运行时缓存与字节码
+__pycache__/
+*.py[cod]
+
+# 操作系统元数据文件
+.DS_Store
+Thumbs.db
