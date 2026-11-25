@@ -2,6 +2,8 @@
 
 <div align="center">
 
+[简体中文](#简体中文) · [English](#english)
+
 # BunnyScholar × GPTZero Humanizer Loop
 
 ### Bunny学术拟人改写 × GPTZero 论文降 AI 率闭环助手
@@ -13,8 +15,6 @@
 [![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Whitopus.bunnyscholar-gptzero-loop)](https://github.com/Whitopus/bunnyscholar-gptzero-loop)
 
 **跳转导航：**
-[简体中文](#简体中文) ·
-[English](#english) ·
 [📚 入口速达](#quick-links) ·
 [🚀 3步上手](#quick-start) ·
 [💬 第一句话怎么说](#first-prompt) ·
