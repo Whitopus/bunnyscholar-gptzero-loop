@@ -1,6 +1,6 @@
 # 初次配置与排错
 
-**第一次用 BunnyScholar，先登录账户。** 打开官网，点「登录」，按弹窗提示用微信扫一扫。已有账户但当前浏览器未登录时，也从这里进入。扫码和账号相关操作由用户完成，Agent 可以先准备后面的终端命令。登录后如出现会员推广，可点「暂不开通」，再通过首页「开放平台」进入控制台。 [BunnyScholar 官网](https://bunnyscholar.cn/)
+**第一次用 BunnyScholar，先登录账户。** Agent 有浏览器控制时，直接打开官网、点「登录」，确认微信扫码弹窗出现，再请用户扫码。也可以自行用同一入口登录。用户说「扫完了」后，接回原会话确认落地页。如果出现会员推广，点「暂不开通」，再通过首页「开放平台」进入控制台。此时可以直接准备后面的终端命令。 [BunnyScholar 官网](https://bunnyscholar.cn/)
 
 **以前配过 Key，或者不确定配过没有？** 在 Skill 目录里运行下面这行。Windows 可把 `python` 换成 `py -3`，macOS / Linux 常用 `python3`。如果当前目录是论文目录，请用脚本的绝对路径。
 
@@ -25,6 +25,13 @@ python scripts/humanizer_loop.py check-env --quick --summary
 
 第一次用 Key 改写前，可以看一下开放平台的「用量信息」。赠额和余额够用就可以继续。整篇或多轮处理时可用 `humanize --dry-run` 先看估算计费字符，再对照服务单价决定是否充值。 [查看用量与余额](https://bunnyscholar.cn/developer) · [价格](https://bunnyscholar.cn/developer/pricing) · [充值入口](https://bunnyscholar.cn/developer/recharge)
 
+<a id="switch-accounts"></a>
+
+## 换账户时
+
+- **只换网页账户。** Agent 可以先打开账号菜单，把浏览器准备到切换账户或重新登录的位置。请用户用目标账户扫码或选择账户，返回后核对网页账户并继续原任务。已有的 CLI 凭据继续按原配置使用。
+- **付费 API 也要换账户。** 在目标账户的「API Keys」准备好对应的 Key，用 `setup-key --replace` 更新本地文件。接着用 `check-env --quick --summary` 核对实际读取来源。如果旧 Key 还设在当前进程的环境变量里，请先更新或清除旧变量，再重启受影响的终端或 Agent。自检只显示来源，账户归属用用户在控制台确认的 Key 对应关系来核对。
+
 ## 遇到什么，下一步做什么
 
 | 看到的情况 | 下一步 |
@@ -37,4 +44,4 @@ python scripts/humanizer_loop.py check-env --quick --summary
 | 只需纯文本，或者已经有可扫描的 PDF | 可直接继续。只有需要从 Word 导出 PDF 时，才需要 Word 或 LibreOffice。 |
 | 想检查 PDF 导出 | 运行 `check-env --summary --skip-update-check`。若自动导出不可用，可在 Word 中手动另存为 PDF、安装 LibreOffice，或在无需分页时改用文本扫描。 |
 
-版本更新与配置可以各自进行。用 `self-update` 检查可用版本，确定要更新时执行 `self-update --apply`。Git 安装也可直接在 Skill 目录执行 `git pull --ff-only`。
+版本更新与配置可以各自进行。用 `self-update` 检查版本，或直接执行 `self-update --apply` 更新。复制安装缺文件可用 `self-update --apply --repair` 重装同版本。详见 [更新 Skill](../README.md#update)。

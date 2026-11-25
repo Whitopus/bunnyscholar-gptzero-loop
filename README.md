@@ -22,6 +22,7 @@
 
 ## 简体中文
 
+<a id="quick-start"></a>
 <a id="install"></a>
 
 ### ⚡ 一句话安装（推荐）
@@ -75,6 +76,8 @@ python scripts/humanizer_loop.py check-env --quick --summary
 | **改几段英文或中文** | `用 bunnyscholar-gptzero-loop 改下面这段英文，目标 GPTZero，保留术语和引文。先给我候选文本。` |
 | **手上已有 GPTZero 报告** | `这是我的 GPTZero 截图。按标记定位 Word 正文，只改第 2 页对应的两段，另存 Word 并标黄。` |
 | **整篇 Word 修订并附报告** | `请保留原稿，先用已有报告选段。改完给我 Word 副本，只在最后用 PDF 做一次分页复测并导出 GPTZero PDF 报告。` |
+| **登录或换号** | `帮我切换 GPTZero 账号。请把浏览器准备到我可以选账号的位置，我登录好后，你接着对刚才那份 PDF 做复测。` |
+| **更新 Skill** | `请更新 bunnyscholar-gptzero-loop，告诉我更新前后的版本。` |
 
 <a id="cli-tools"></a>
 
@@ -97,14 +100,29 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output res
 | `apply --docx paper.docx --humanized result.json --output-docx paper.revised.docx` | 按匹配的段号写入选定结果并另存副本。 |
 | `snapshot --docx paper.docx` / `rollback --docx paper.docx --list` | 多轮修订时存档、查看或恢复版本。 |
 | `export-pdf --docx paper.revised.docx` | 用 Windows Word 或 LibreOffice 导出 PDF。 |
-| `self-update` / `self-update --apply` | 检查远程版本并安全更新；Git 安装也可直接执行 `git pull --ff-only`。 |
+| `self-update` / `self-update --apply` | [检查与更新 Skill](#update)。 |
 
+<a id="update"></a>
+
+### 更新 Skill
+
+可以直接对 Agent 说「更新 bunnyscholar-gptzero-loop」，也可以在 Skill 目录运行：
+
+```sh
+python scripts/humanizer_loop.py self-update
+python scripts/humanizer_loop.py self-update --apply
+```
+
+第一条立即查询远端，第二条执行更新。Git 安装沿跟踪分支快进；复制或 ZIP 安装会从同一个 GitHub 归档更新 Skill 自带文件，保留额外文件与本地配置。同版本要补回缺失文件时，复制安装用 `self-update --apply --repair`。已打开的会话若仍沿用旧指引，可让 Agent 重新读取 Skill。
+
+<a id="quick-links"></a>
 <a id="troubleshooting"></a>
 
 ### 🔧 排错与文档入口
 
 - **密钥已配置，服务仍报错**：自检只看本地来源；`401`/`403` 请核对密钥与控制台状态，`402` 请检查余额。[配置与排错](references/onboarding_guide.md)
-- **找不到分页视图 / 导出报告无响应**：登录或人机验证出现时可接手当前浏览器；在 GPTZero `/batches/...` 页若 `Export` 无响应，从左侧 `Scans` 点开单文档页即可免费 `Export` 下载原生 PDF 报告。[浏览器操作参考](references/gptzero_browser_sop.md)
+- **需要登录或换号**。Agent 可以先打开登录页或账号菜单，再把浏览器交给你扫码、验证或选账号。你操作完，它会核对状态并继续。只换 BunnyScholar 网页账号时，原来的 API Key 可以继续用。 [GPTZero 登录和换号](references/gptzero_browser_sop.md#sign-in-and-switch) · [BunnyScholar 换号](references/onboarding_guide.md#switch-accounts)
+- **导出报告无响应**。从 `Scans` 打开对应单文档，再尝试 `Export → Download PDF`。逐页分数可另外记录。 [报告导出](references/gptzero_browser_sop.md#export-report)
 - **没装 Word / LibreOffice**：纯文本改写、读取报告和 Word 段落修改都能正常使用，仅从 DOCX 导出 PDF 时需要导出工具。[Word 段落修订与复测](references/anti_ai_playbook.md)
 - **Agent 工作流总览**：想查看 Agent 如何按需选择最短路径，见 [SKILL.md](SKILL.md)。
 
@@ -154,7 +172,11 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --dry-run
 python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output result.json --allow-quality-warnings
 ```
 
-English/GPTZero are the defaults. For Word, use `inspect` to locate paragraph IDs and `apply --output-docx` to save a revised copy. To update, run `self-update` / `self-update --apply` (or `git pull --ff-only` for Git installs).
+English/GPTZero are the defaults. For Word, use `inspect` to locate paragraph IDs and `apply --output-docx` to save a revised copy.
+
+To sign in or switch accounts, have the agent open the relevant screen, hand it over for verification or account selection, and resume the task when you return control. BunnyScholar's web session and CLI key can be switched independently. [GPTZero sign-in and account switching](references/gptzero_browser_sop.md#sign-in-and-switch) · [BunnyScholar account switching](references/onboarding_guide.md#switch-accounts)
+
+To update, run `self-update` to compare versions, or `self-update --apply` to install. Git installs fast-forward and copied installs use one GitHub archive. Use `--repair` to reinstall the same version on a copied install.
 
 ## License
 

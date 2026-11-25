@@ -42,7 +42,7 @@ DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 LOGIN_URL = "https://bunnyscholar.cn/"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
-SKILL_VERSION = "1.2.1"
+SKILL_VERSION = "1.2.2"
 SUPPORTED_HUMANIZER_LANGUAGES: Tuple[str, ...] = ("en", "zh_CN")
 SUPPORTED_PLATFORMS_BY_LANGUAGE: Dict[str, Tuple[str, ...]] = {
     "zh_CN": ("cnki", "wanfang", "weipu", "gezida", "daya", "turnitin"),
@@ -52,6 +52,7 @@ HUMANIZER_REF_UNIT_PRICE_CNY = 1.0
 SKILL_REPO_URL = "https://github.com/Whitopus/bunnyscholar-gptzero-loop"
 SKILL_REMOTE_RAW_BASE = "https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main"
 SKILL_REMOTE_SKILL_MD_URL = f"{SKILL_REMOTE_RAW_BASE}/SKILL.md"
+SKILL_REMOTE_ARCHIVE = "https://codeload.github.com/Whitopus/bunnyscholar-gptzero-loop/zip/refs/heads/main"
 SKILL_UPDATE_FILES: Tuple[str, ...] = (
     "SKILL.md",
     "README.md",
@@ -541,16 +542,31 @@ def detect_bunnyscholar_skill() -> Dict[str, Any]:
 def _parse_semver(ver: str) -> Tuple[int, ...]:
     """解析语义化版本号为整数元组，便于安全比较。"""
     nums = [int(x) for x in re.findall(r"\d+", ver)]
-    return tuple(nums) if nums else (0,)
+    return tuple((nums + [0, 0, 0])[:3])
 
 
 def _extract_frontmatter_version(text: str) -> Optional[str]:
     """从 SKILL.md YAML frontmatter 提取 version 字段。"""
-    m = re.match(r"^\s*---\s*\r?\n(.*?)\r?\n---", text, re.DOTALL)
+    m = re.match(r"^\s*---\s*\r?\n(.*?)\r?\n---", text.lstrip("\ufeff"), re.DOTALL)
     if not m:
         return None
     vm = re.search(r"^\s*version:\s*['\"]?([0-9]+\.[0-9]+(?:\.[0-9]+)?)['\"]?\s*$", m.group(1), re.MULTILINE)
     return vm.group(1) if vm else None
+
+
+def _read_skill_version(skill_dir: Path) -> Optional[str]:
+    manifest = skill_dir / "SKILL.md"
+    if not manifest.is_file():
+        return None
+    return _extract_frontmatter_version(manifest.read_text(encoding="utf-8"))
+
+
+def _update_version_status(current: Optional[str], latest: str) -> str:
+    if current is None or _parse_semver(latest) > _parse_semver(current):
+        return "update_available"
+    if _parse_semver(latest) < _parse_semver(current):
+        return "local_newer"
+    return "up_to_date"
 
 
 def check_skill_update(
@@ -558,6 +574,7 @@ def check_skill_update(
     force: bool = False,
     source_url: str = SKILL_REMOTE_SKILL_MD_URL,
     timeout: float = 2.0,
+    current_version: Optional[str] = SKILL_VERSION,
 ) -> Dict[str, Any]:
     """短超时且可跳过的版本探针，默认使用 24 小时缓存。"""
     skill_dir = Path(__file__).resolve().parent.parent
@@ -568,7 +585,7 @@ def check_skill_update(
         else f'python "{Path(__file__).resolve()}" self-update --apply'
     )
     base: Dict[str, Any] = {
-        "current_version": SKILL_VERSION,
+        "current_version": current_version,
         "latest_version": None,
         "update_available": False,
         "status": "skipped" if skip else "unknown",
@@ -581,18 +598,18 @@ def check_skill_update(
         return base
 
     cache_path = Path(tempfile.gettempdir()) / "bunnyscholar_gptzero_loop_update_cache.json"
-    use_cache = (source_url == SKILL_REMOTE_SKILL_MD_URL) and (not force)
-    if use_cache and cache_path.is_file():
+    official_source = source_url == SKILL_REMOTE_SKILL_MD_URL
+    if official_source and not force and cache_path.is_file():
         try:
             cached = json.loads(cache_path.read_text(encoding="utf-8-sig"))
             ts = float(cached.get("checked_at", 0.0))
             if (time.time() - ts) < UPDATE_CACHE_TTL_SECONDS and cached.get("latest_version"):
                 latest = str(cached["latest_version"])
-                avail = _parse_semver(latest) > _parse_semver(SKILL_VERSION)
+                status = _update_version_status(current_version, latest)
                 base.update({
                     "latest_version": latest,
-                    "update_available": avail,
-                    "status": "update_available" if avail else "up_to_date",
+                    "update_available": status == "update_available",
+                    "status": status,
                     "cached": True,
                 })
                 return base
@@ -607,14 +624,14 @@ def check_skill_update(
         if not latest:
             base["status"] = "unreachable"
             return base
-        avail = _parse_semver(latest) > _parse_semver(SKILL_VERSION)
+        status = _update_version_status(current_version, latest)
         base.update({
             "latest_version": latest,
-            "update_available": avail,
-            "status": "update_available" if avail else "up_to_date",
+            "update_available": status == "update_available",
+            "status": status,
             "cached": False,
         })
-        if use_cache:
+        if official_source:
             try:
                 cache_path.write_text(
                     json.dumps({"checked_at": time.time(), "latest_version": latest}),
@@ -628,24 +645,51 @@ def check_skill_update(
         return base
 
 
+def _download_skill_files(raw_base: str, timeout: float) -> Dict[str, bytes]:
+    headers = {"User-Agent": f"bunnyscholar-gptzero-loop/{SKILL_VERSION}"}
+    if raw_base == SKILL_REMOTE_RAW_BASE:
+        with urllib.request.urlopen(urllib.request.Request(SKILL_REMOTE_ARCHIVE, headers=headers), timeout=timeout) as resp:
+            archive_bytes = resp.read()
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            manifests = [name for name in archive.namelist() if name.count("/") == 1 and name.endswith("/SKILL.md")]
+            if len(manifests) != 1:
+                raise CliError("The update archive must contain one top-level skill folder.")
+            root = manifests[0].split("/")[0]
+            try:
+                return {rel: archive.read(f"{root}/{rel}") for rel in SKILL_UPDATE_FILES}
+            except KeyError as exc:
+                raise CliError(f"The update archive is incomplete: {exc}") from exc
+
+    downloaded: Dict[str, bytes] = {}
+    for rel in SKILL_UPDATE_FILES:
+        request = urllib.request.Request(f"{raw_base}/{rel}", headers=headers)
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            downloaded[rel] = resp.read()
+    return downloaded
+
+
 def self_update_skill(
     apply_changes: bool = False,
     skill_dir: Optional[Path] = None,
     raw_base: str = SKILL_REMOTE_RAW_BASE,
     timeout: float = 15.0,
+    repair: bool = False,
 ) -> Dict[str, Any]:
-    """安全更新本地 Skill（Git 目录走 git pull --ff-only，非 Git 目录按静态白名单原子覆盖）。"""
+    """从 Git 或同一次发布的仓库归档更新 Skill。"""
     target_dir = (skill_dir if skill_dir else Path(__file__).resolve().parent.parent).resolve()
     is_git = (target_dir / ".git").exists()
-    mode = "git_pull" if is_git else "http_raw_whitelist"
+    raw_base = raw_base.rstrip("/")
+    mode = "git_pull" if is_git else ("http_archive" if raw_base == SKILL_REMOTE_RAW_BASE else "http_raw_whitelist")
+    local_version = _read_skill_version(target_dir)
+    common = {"dry_run": not apply_changes, "skill_dir": str(target_dir), "mode": mode}
 
     if not apply_changes:
-        probe = check_skill_update(skip=False, force=True, source_url=f"{raw_base.rstrip('/')}/SKILL.md")
+        probe = check_skill_update(
+            force=True, source_url=f"{raw_base}/SKILL.md", timeout=timeout, current_version=local_version,
+        )
         return {
-            "dry_run": True,
-            "skill_dir": str(target_dir),
-            "mode": mode,
-            "current_version": SKILL_VERSION,
+            **common,
+            "current_version": local_version,
             "latest_version": probe.get("latest_version"),
             "update_available": probe.get("update_available", False),
             "status": probe.get("status"),
@@ -653,52 +697,45 @@ def self_update_skill(
         }
 
     if is_git:
-        proc = subprocess.run(
-            ["git", "-C", str(target_dir), "pull", "--ff-only"],
-            capture_output=True,
-            text=True,
-            timeout=int(max(10, timeout)),
-        )
-        if proc.returncode != 0:
-            raise CliError(f"git pull --ff-only failed: {(proc.stderr or proc.stdout).strip()}")
+        def git_output(*args: str) -> str:
+            proc = subprocess.run(
+                ["git", "-C", str(target_dir), *args],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+            )
+            if proc.returncode != 0:
+                raise CliError(f"git {' '.join(args)} failed: {(proc.stderr or proc.stdout).strip()}")
+            return proc.stdout.strip()
+
+        old_head = git_output("rev-parse", "HEAD")
+        pull_output = git_output("pull", "--ff-only")
+        updated = git_output("rev-parse", "HEAD") != old_head
         return {
-            "dry_run": False,
-            "updated": True,
-            "skill_dir": str(target_dir),
-            "mode": mode,
-            "git_output": (proc.stdout or proc.stderr).strip(),
+            **common,
+            "updated": updated,
+            "status": "updated" if updated else "up_to_date",
+            "previous_version": local_version,
+            "latest_version": _read_skill_version(target_dir),
+            "git_output": pull_output,
         }
 
-    base_clean = raw_base.rstrip("/")
-    downloaded: Dict[str, bytes] = {}
-    for rel in SKILL_UPDATE_FILES:
-        url = f"{base_clean}/{rel}"
-        req = urllib.request.Request(url, headers={"User-Agent": f"bunnyscholar-gptzero-loop/{SKILL_VERSION}"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
-        if not data:
-            raise CliError(f"Downloaded empty content from {url}; aborting update.")
-        downloaded[rel] = data
-
-    updated_files: List[str] = []
-    for rel, data in downloaded.items():
-        dst = target_dir / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp_dst = dst.with_name(f".tmp_{dst.name}_{os.getpid()}")
-        tmp_dst.write_bytes(data)
-        os.replace(tmp_dst, dst)
-        updated_files.append(rel)
-
+    downloaded = _download_skill_files(raw_base, timeout)
+    empty_files = [rel for rel, payload in downloaded.items() if not payload]
+    if empty_files:
+        raise CliError(f"The update contains empty files: {', '.join(empty_files)}.")
     new_ver = _extract_frontmatter_version(downloaded["SKILL.md"].decode("utf-8", errors="replace"))
-    return {
-        "dry_run": False,
-        "updated": True,
-        "skill_dir": str(target_dir),
-        "mode": mode,
-        "previous_version": SKILL_VERSION,
-        "latest_version": new_ver,
-        "updated_files": updated_files,
-    }
+    if not new_ver:
+        raise CliError("The downloaded SKILL.md has no valid version.")
+
+    status = _update_version_status(local_version, new_ver)
+    result = {**common, "previous_version": local_version, "latest_version": new_ver}
+    if status == "local_newer" or (status == "up_to_date" and not repair):
+        return {**result, "updated": False, "status": status, "updated_files": []}
+
+    # Write the version marker last, so an interrupted upgrade can be rerun.
+    updated_files = [rel for rel in SKILL_UPDATE_FILES if rel != "SKILL.md"] + ["SKILL.md"]
+    for rel in updated_files:
+        atomic_write_bytes(target_dir / rel, downloaded[rel])
+    return {**result, "updated": True, "status": "updated", "updated_files": updated_files}
 
 
 def check_environment(
@@ -1562,6 +1599,23 @@ def _load_snapshot_history(snap_dir: Path, docx_name: str) -> Dict[str, Any]:
     return data
 
 
+def _resolve_snapshot_dir(docx_path: Path, snapshot_dir: Optional[Path]) -> Path:
+    if snapshot_dir is not None:
+        return snapshot_dir
+
+    root = docx_path.parent / ".snapshots"
+    per_document = root / docx_path.name
+    if per_document.is_dir() or not (root / "history.json").is_file():
+        return per_document
+
+    # Keep reading an existing default history for the document that owns it.
+    history = _load_snapshot_history(root, docx_path.name)
+    owner = history.get("docx_name")
+    if isinstance(owner, str) and os.path.normcase(owner) == os.path.normcase(docx_path.name):
+        return root
+    return per_document
+
+
 def create_snapshot(
     docx_path: Path,
     snapshot_dir: Optional[Path] = None,
@@ -1571,10 +1625,10 @@ def create_snapshot(
     pages: Optional[Any] = None,
     note: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """备份当前 .docx 到 .snapshots/v{N}_{timestamp}.docx 并原子更新 history.json。"""
+    """备份当前 .docx 并原子更新该文档的 history.json。"""
     if not docx_path.is_file():
         raise CliError(f"DOCX file not found: {docx_path}")
-    snap_dir = snapshot_dir if snapshot_dir else (docx_path.parent / ".snapshots")
+    snap_dir = _resolve_snapshot_dir(docx_path, snapshot_dir)
     snap_dir.mkdir(parents=True, exist_ok=True)
 
     history = _load_snapshot_history(snap_dir, docx_path.name)
@@ -1631,7 +1685,7 @@ def rollback_snapshot(
     best: bool = False,
 ) -> Dict[str, Any]:
     """查看快照对比列表或将指定/最高分快照安全原子回滚至目标 .docx。"""
-    snap_dir = snapshot_dir if snapshot_dir else (docx_path.parent / ".snapshots")
+    snap_dir = _resolve_snapshot_dir(docx_path, snapshot_dir)
     history = _load_snapshot_history(snap_dir, docx_path.name)
     snapshots = history["snapshots"]
     best_entry = _select_best_snapshot(snapshots)
@@ -1889,7 +1943,7 @@ def call_humanizer_api(
     payload_obj: Dict[str, Any] = {
         "text": text,
         "language": language,
-        "platform": resolved_platform,
+        "platform": platform_name,
         "needPlagiarismReduction": bool(dual_stage),
     }
     if personal_terms:
@@ -2395,7 +2449,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Save a timestamped backup snapshot of .docx and record GPTZero metrics in history.json.",
     )
     p_snap.add_argument("--docx", required=True, help="Path to target .docx file.")
-    p_snap.add_argument("--snapshot-dir", default=None, help="Snapshot directory (default: <docx_dir>/.snapshots).")
+    p_snap.add_argument("--snapshot-dir", default=None, help="Snapshot directory (default: a per-document directory under .snapshots).")
     p_snap.add_argument("--overall-human", type=float, default=None, help="Overall Human percentage (0-100).")
     p_snap.add_argument("--mixed", type=float, default=None, help="Mixed percentage (0-100).")
     p_snap.add_argument("--ai", type=float, default=None, help="AI percentage (0-100).")
@@ -2481,6 +2535,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check or apply a safe update for this skill (git pull --ff-only or static whitelist download).",
     )
     p_upd.add_argument("--apply", action="store_true", help="Apply update (default is dry-run version check).")
+    p_upd.add_argument("--repair", action="store_true", help="With --apply, reinstall the same version on a copied installation.")
     p_upd.add_argument("--skill-dir", default=None, help="Override target skill directory.")
     p_upd.add_argument("--raw-base", default=SKILL_REMOTE_RAW_BASE, help="Override remote raw base URL.")
     p_upd.add_argument("--timeout", type=float, default=15.0, help="Download/git timeout in seconds (default: 15.0).")
@@ -2620,6 +2675,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 skill_dir=Path(args.skill_dir) if args.skill_dir else None,
                 raw_base=args.raw_base,
                 timeout=args.timeout,
+                repair=bool(args.repair),
             )
             emit_result(result, args.output)
             return 0
