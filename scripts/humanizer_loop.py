@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import getpass
 import hashlib
 import io
 import json
@@ -19,6 +20,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import warnings
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
@@ -37,9 +39,10 @@ else:
 # ==============================================================================
 
 DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
+LOGIN_URL = "https://bunnyscholar.cn/"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
-SKILL_VERSION = "1.1.0"
+SKILL_VERSION = "1.2.0"
 SKILL_REPO_URL = "https://github.com/Whitopus/bunnyscholar-gptzero-loop"
 SKILL_REMOTE_RAW_BASE = "https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main"
 SKILL_REMOTE_SKILL_MD_URL = f"{SKILL_REMOTE_RAW_BASE}/SKILL.md"
@@ -58,7 +61,7 @@ UPDATE_CACHE_TTL_SECONDS = 86400
 KEYS_URL = "https://bunnyscholar.cn/developer/keys"
 RECHARGE_URL = "https://bunnyscholar.cn/developer/recharge"
 DEFAULT_RATE_LIMIT = 20.0
-DEFAULT_MAX_RETRIES = 3
+DEFAULT_MAX_RETRIES = 0
 DEFAULT_HTTP_RETRIES = 3
 DEFAULT_TIMEOUT = 30.0
 
@@ -121,25 +124,8 @@ REFERENCES_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Windows / macOS / Linux 下无回显安全录入 API Key 的终端命令模板
-POWERSHELL_KEY_SETUP_CMD = (
-    '$s = Read-Host "Enter BUNNYSCHOLAR_API_KEY (typing hidden)" -AsSecureString; '
-    "$b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); "
-    "try { "
-    "$v = [Runtime.InteropServices.Marshal]::PtrToStringAuto($b); "
-    '$p = Join-Path $HOME ".env"; '
-    "$enc = [System.Text.UTF8Encoding]::new($false); "
-    '$pre = if ((Test-Path $p) -and ([System.IO.File]::ReadAllText($p) -notmatch "(\\r?\\n)$")) { "`n" } else { "" }; '
-    '[System.IO.File]::AppendAllText($p, "${pre}BUNNYSCHOLAR_API_KEY=$v`n", $enc); '
-    'Write-Host "Saved to $p" '
-    "} finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }"
-)
-
-BASH_KEY_SETUP_CMD = (
-    'printf "Enter BUNNYSCHOLAR_API_KEY (typing hidden): " && read -s val && echo && '
-    'echo "BUNNYSCHOLAR_API_KEY=$val" >> "$HOME/.env" && unset val && '
-    'echo "Saved to $HOME/.env"'
-)
+API_KEY_NAME = "BUNNYSCHOLAR_API_KEY"
+EXAMPLE_API_KEY = "sk-replace-with-your-bunnyscholar-api-key"
 
 
 class CliError(RuntimeError):
@@ -328,26 +314,28 @@ def _parse_dotenv_key_from_line(line: str, key_name: str) -> Optional[str]:
         return None
     if s.startswith("export ") or s.startswith("export\t"):
         s = s[6:].lstrip()
-    prefix = f"{key_name}="
-    if not s.startswith(prefix):
+    name, separator, value = s.partition("=")
+    if not separator or name.strip() != key_name:
         return None
-    val = s[len(prefix):].strip()
+    val = value.strip()
     if len(val) >= 2 and ((val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'")):
         val = val[1:-1].strip()
     return val
 
 
-def probe_env_file_for_key(env_path: Path, key_name: str = "BUNNYSCHOLAR_API_KEY") -> bool:
-    """静默探测 .env 文件中是否存在非空的目标 Key；仅返回布尔值，绝不回传或保留密钥明文。"""
-    if not env_path.is_file():
-        return False
-    found = False
+def _usable_key(value: str) -> Optional[str]:
+    value = value.strip()
+    return value if value and value != EXAMPLE_API_KEY else None
+
+
+def _read_dotenv_key(env_path: Path) -> Optional[str]:
+    value = ""
     with env_path.open("r", encoding="utf-8-sig", errors="replace") as f:
         for line in f:
-            val = _parse_dotenv_key_from_line(line, key_name)
-            if val is not None:
-                found = bool(val)
-    return found
+            parsed = _parse_dotenv_key_from_line(line, API_KEY_NAME)
+            if parsed is not None:
+                value = parsed
+    return _usable_key(value)
 
 
 def _read_key_for_runtime_call(
@@ -356,20 +344,15 @@ def _read_key_for_runtime_call(
 ) -> Tuple[Optional[str], Optional[str]]:
     """仅供 humanize 发送 HTTP 鉴权头时在内存临时读取 Key；严禁将返回值写入日志或输出 JSON。"""
     if not ignore_process_env:
-        env_val = os.environ.get("BUNNYSCHOLAR_API_KEY", "").strip()
+        env_val = _usable_key(os.environ.get(API_KEY_NAME, ""))
         if env_val:
-            return env_val, "env:BUNNYSCHOLAR_API_KEY"
+            return env_val, f"env:{API_KEY_NAME}"
 
     candidate_files = _resolve_default_env_paths(env_paths)
     for env_file in candidate_files:
         if not env_file.is_file():
             continue
-        matched_val: Optional[str] = None
-        with env_file.open("r", encoding="utf-8-sig", errors="replace") as f:
-            for line in f:
-                parsed = _parse_dotenv_key_from_line(line, "BUNNYSCHOLAR_API_KEY")
-                if parsed is not None:
-                    matched_val = parsed
+        matched_val = _read_dotenv_key(env_file)
         if matched_val:
             return matched_val, str(env_file)
     return None, None
@@ -384,6 +367,45 @@ def _resolve_default_env_paths(env_paths: Optional[Sequence[str]] = None) -> Lis
         home / ".env",
         home / ".gemini" / "config" / "plugins" / "bunnyscholar-api" / ".env",
     ]
+
+
+def setup_api_key(env_file: Path) -> Dict[str, Any]:
+    """交互式录入密钥，在 .env 中替换同名条目并保留其他设置。"""
+    if not sys.stdin.isatty() or not sys.stderr.isatty():
+        raise CliError("Open a local terminal and run setup-key there for hidden input.")
+
+    log_stderr(f"Need a key? Sign in at {LOGIN_URL}, then open {KEYS_URL}")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            key = getpass.getpass(f"Paste {API_KEY_NAME} (input hidden), then press Enter: ").strip()
+    except getpass.GetPassWarning as exc:
+        raise CliError("This terminal cannot hide input. Run setup-key in a local terminal.") from exc
+    except (EOFError, KeyboardInterrupt) as exc:
+        raise CliError("Key setup cancelled.") from exc
+    if not _usable_key(key) or re.search(r"""[\s'"]""", key):
+        raise CliError("Paste the API key from your BunnyScholar console, without quotes or spaces.")
+
+    env_file = env_file.expanduser().resolve()
+    existing = env_file.read_bytes() if env_file.exists() else b""
+    has_bom = existing.startswith(b"\xef\xbb\xbf")
+    content = existing.decode("utf-8-sig")
+    newline = "\r\n" if "\r\n" in content else "\n"
+    lines = [
+        line for line in content.splitlines(keepends=True)
+        if _parse_dotenv_key_from_line(line, API_KEY_NAME) is None
+    ]
+    retained = "".join(lines)
+    if retained and not retained.endswith(("\n", "\r")):
+        retained += newline
+    updated = f"{retained}{API_KEY_NAME}={key}{newline}"
+    atomic_write_bytes(env_file, updated.encode("utf-8-sig" if has_bom else "utf-8"))
+    if _read_dotenv_key(env_file) != key:
+        raise CliError(f"Could not verify the saved key in {env_file}.")
+    return {
+        "saved_to": str(env_file),
+        "process_env_takes_precedence": bool(_usable_key(os.environ.get(API_KEY_NAME, ""))),
+    }
 
 
 def detect_word_com() -> Dict[str, Any]:
@@ -495,10 +517,14 @@ def detect_bunnyscholar_skill() -> Dict[str, Any]:
         home / ".agents" / "skills" / "bunnyscholar-api" / "SKILL.md",
         home / ".gemini" / "skills" / "bunnyscholar-api" / "SKILL.md",
         home / ".config" / "opencode" / "skills" / "bunnyscholar-api" / "SKILL.md",
-        cwd / ".agents" / "skills" / "bunnyscholar-api" / "SKILL.md",
-        cwd / ".claude" / "skills" / "bunnyscholar-api" / "SKILL.md",
-        cwd / ".gemini" / "skills" / "bunnyscholar-api" / "SKILL.md",
+        Path(__file__).resolve().parents[2] / "bunnyscholar-api" / "SKILL.md",
     ]
+    candidates.extend(
+        root / relative / "bunnyscholar-api" / "SKILL.md"
+        for root in (cwd, *cwd.parents)
+        for relative in (".agents/skills", ".claude/skills", ".gemini/skills", ".agent/skills")
+    )
+    candidates = list(dict.fromkeys(candidates))
     checked = [str(p) for p in candidates]
     for p in candidates:
         if p.is_file():
@@ -527,9 +553,9 @@ def check_skill_update(
     source_url: str = SKILL_REMOTE_SKILL_MD_URL,
     timeout: float = 2.0,
 ) -> Dict[str, Any]:
-    """轻量非阻塞版本探针（2s 超时 + 24h 临时缓存），弱网/断网时静默降级绝不阻断主流程。"""
+    """短超时且可跳过的版本探针，默认使用 24 小时缓存。"""
     skill_dir = Path(__file__).resolve().parent.parent
-    is_git = (skill_dir / ".git").is_dir()
+    is_git = (skill_dir / ".git").exists()
     update_cmd = (
         f'git -C "{skill_dir}" pull --ff-only'
         if is_git
@@ -604,7 +630,7 @@ def self_update_skill(
 ) -> Dict[str, Any]:
     """安全更新本地 Skill（Git 目录走 git pull --ff-only，非 Git 目录按静态白名单原子覆盖）。"""
     target_dir = (skill_dir if skill_dir else Path(__file__).resolve().parent.parent).resolve()
-    is_git = (target_dir / ".git").is_dir()
+    is_git = (target_dir / ".git").exists()
     mode = "git_pull" if is_git else "http_raw_whitelist"
 
     if not apply_changes:
@@ -675,6 +701,7 @@ def check_environment(
     skip_update_check: bool = False,
     force_update_check: bool = False,
     update_source_url: str = SKILL_REMOTE_SKILL_MD_URL,
+    skip_pdf_check: bool = False,
 ) -> Dict[str, Any]:
     """执行完整环境探测，返回绝对不含任何敏感 Key 明文的结构化报告。"""
     sources_checked: List[Dict[str, Any]] = []
@@ -682,7 +709,7 @@ def check_environment(
     api_found = False
 
     if not ignore_process_env:
-        has_proc_key = bool(os.environ.get("BUNNYSCHOLAR_API_KEY", "").strip())
+        has_proc_key = bool(_usable_key(os.environ.get(API_KEY_NAME, "")))
         sources_checked.append({
             "source": "env:BUNNYSCHOLAR_API_KEY",
             "type": "process_env",
@@ -695,7 +722,7 @@ def check_environment(
 
     for env_file in _resolve_default_env_paths(env_paths):
         file_exists = env_file.is_file()
-        file_has_key = probe_env_file_for_key(env_file, "BUNNYSCHOLAR_API_KEY") if file_exists else False
+        file_has_key = bool(_read_dotenv_key(env_file)) if file_exists else False
         sources_checked.append({
             "source": str(env_file),
             "type": "dotenv_file",
@@ -706,8 +733,12 @@ def check_environment(
             api_found = True
             matched_source = str(env_file)
 
-    word_com = detect_word_com()
-    libreoffice = detect_libreoffice()
+    if skip_pdf_check:
+        word_com = {"available": False, "version": None, "error": None}
+        libreoffice = {"available": False, "path": None, "version": None, "error": None}
+    else:
+        word_com = detect_word_com()
+        libreoffice = detect_libreoffice()
     preferred_pdf_backend: Optional[str] = None
     if word_com["available"]:
         preferred_pdf_backend = "word_com"
@@ -737,19 +768,20 @@ def check_environment(
             "bunnyscholar_api_prerequisite": {
                 "installed": bool(skill_info.get("found")),
                 "skill_url": BUNNYSCHOLAR_SKILL_URL,
-                "prerequisite_prompt": f"请根据 {BUNNYSCHOLAR_SKILL_URL}，安装 bunnyscholar-api。",
+                "prerequisite_prompt": f"参考官方接口说明 {BUNNYSCHOLAR_SKILL_URL}。如需离线复用，可安装 bunnyscholar-api。",
             },
             "console_url": CONSOLE_URL,
+            "login_url": LOGIN_URL,
             "keys_url": KEYS_URL,
             "recharge_url": RECHARGE_URL,
-            "powershell_command": POWERSHELL_KEY_SETUP_CMD,
-            "bash_command": BASH_KEY_SETUP_CMD,
+            "setup_command": f'python "{Path(__file__).resolve()}" setup-key',
             "note": (
-                "Run one of the hidden-input commands above in your terminal to save "
-                "BUNNYSCHOLAR_API_KEY into ~/.env without echoing or pasting the secret in chat."
+                "Run setup-key in a local terminal. A detected key is a local presence check, "
+                "and has not been authenticated."
             ),
         },
         "pdf_backends": {
+            "checked": not skip_pdf_check,
             "word_com": word_com,
             "libreoffice": libreoffice,
             "preferred": preferred_pdf_backend,
@@ -759,6 +791,29 @@ def check_environment(
         },
         "update": update_info,
     }
+
+
+def print_environment_summary(result: Dict[str, Any]) -> None:
+    print(f"Python {result['platform']['python_version']} | Skill {SKILL_VERSION}")
+    key_info = result["api_key"]
+    setup = result["setup_instructions"]
+    if key_info["found"]:
+        print(f"BunnyScholar key: found in {key_info['matched_source']} (local check only)")
+    else:
+        print(f"BunnyScholar key: missing. If new or signed out, log in first at {setup['login_url']}")
+        print(f"Open API Keys: {setup['keys_url']}")
+        print(f"Then run in your own terminal: {setup['setup_command']}")
+
+    if result["skills"]["bunnyscholar_api"]["found"]:
+        print("BunnyScholar API reference: local skill found")
+    else:
+        print(f"BunnyScholar API reference: {BUNNYSCHOLAR_SKILL_URL}")
+
+    pdf = result["pdf_backends"]
+    if pdf["checked"]:
+        print(f"PDF export: {pdf['preferred'] or 'unavailable (text and DOCX editing still work)'}")
+    if result["update"]["update_available"]:
+        print(f"Available skill update: {result['update']['latest_version']}")
 
 
 # ==============================================================================
@@ -1923,8 +1978,8 @@ def _parse_personal_terms(raw: Optional[str]) -> Optional[List[str]]:
 
 
 def run_humanize_batch(
-    input_path: Path,
-    output_path: Path,
+    input_path: Optional[Path],
+    output_path: Optional[Path],
     dual_stage: bool = False,
     rate_limit: float = DEFAULT_RATE_LIMIT,
     max_retries: int = DEFAULT_MAX_RETRIES,
@@ -1941,24 +1996,33 @@ def run_humanize_batch(
     allow_first_person: bool = False,
     max_word_len: int = 16,
     disable_quality_gate: bool = False,
+    text_file: Optional[str] = None,
+    dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """批量对输入段落调用拟人改写 API，并强制执行计费长度预检与质量门禁重刷。"""
-    api_key, key_source = _read_key_for_runtime_call(env_paths=env_paths, ignore_process_env=ignore_process_env)
-    if not api_key:
-        raise CliError(
-            "BUNNYSCHOLAR_API_KEY not found. Run 'check-env' first and configure your key via "
-            f"hidden-input terminal command from {CONSOLE_URL}."
-        )
+    """预检段落长度，并按需调用 API 与检查改写结果。"""
+    if not dry_run and output_path is None:
+        raise CliError("Provide --output for live requests, or use --dry-run to check the input first.")
 
-    items = _load_humanized_items(input_path)
+    if text_file is not None:
+        label = "standard input" if text_file == "-" else text_file
+        if text_file == "-":
+            text = sys.stdin.buffer.read().decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+        else:
+            text = Path(text_file).read_text(encoding="utf-8-sig")
+        items = [{"para_index": 1, "text": text.strip()}]
+    elif input_path is not None:
+        label = str(input_path)
+        items = _load_humanized_items(input_path)
+    else:
+        raise CliError("Provide --input or --text-file.")
     if not items:
-        raise CliError(f"No paragraph items found in {input_path}.")
+        raise CliError(f"No paragraph items found in {label}.")
 
     # 预检全部段落文本结构与计费长度（20–500 计费字符）
     validated_items: List[Tuple[int, str, int]] = []
     for idx, item in enumerate(items, start=1):
         if not isinstance(item, dict):
-            raise CliError(f"Item #{idx} in {input_path} must be an object.")
+            raise CliError(f"Item #{idx} in {label} must be an object.")
         para_index = item.get("para_index", idx)
         if not isinstance(para_index, int) or isinstance(para_index, bool) or para_index <= 0:
             raise CliError(f"Invalid para_index in item #{idx}: {para_index!r}")
@@ -1976,6 +2040,28 @@ def run_humanize_batch(
                 f"Paragraph {para_index} billable length is {billable} units, outside API required range [20, 500]. {advice}"
             )
         validated_items.append((para_index, src_text, billable))
+
+    if dry_run:
+        preview = {
+            "dry_run": True,
+            "language": language,
+            "platform": platform_name,
+            "dual_stage": dual_stage,
+            "total_billable_chars_estimated": sum(item[2] for item in validated_items),
+            "paragraphs": [
+                {"para_index": para_index, "billable_chars_estimated": billable}
+                for para_index, _, billable in validated_items
+            ],
+        }
+        emit_result(preview, str(output_path) if output_path else None)
+        return preview
+
+    api_key, key_source = _read_key_for_runtime_call(env_paths=env_paths, ignore_process_env=ignore_process_env)
+    if not api_key:
+        raise CliError(
+            f"{API_KEY_NAME} not found. Log in if needed at {LOGIN_URL}, open {KEYS_URL}, then run "
+            "'setup-key' in your local terminal, or set the environment variable for this process."
+        )
 
     resolved_lock = lock_file if lock_file else _default_lock_file_path()
     total_gate_rounds = 1 + max(0, max_retries)
@@ -2006,7 +2092,7 @@ def run_humanize_batch(
                 language=language,
                 platform_name=platform_name,
             )
-            # 铁律：绝对原封不动保留 API 返回的 data.text，禁止任何二次润色或字符串修饰
+            # 保留服务的原始候选文本，便于比较与复测。
             api_text = resp["data"]["text"]
             last_text = api_text
             last_usage = resp.get("usage") if isinstance(resp.get("usage"), dict) else {}
@@ -2229,11 +2315,12 @@ def export_pdf(
 # ==============================================================================
 
 def build_parser() -> argparse.ArgumentParser:
-    """构建主命令及 7 个标准化子命令的 argparse 解析器。"""
+    """构建 CLI 入口与子命令。"""
     parser = argparse.ArgumentParser(
         prog="humanizer_loop.py",
         description="BunnyScholar x GPTZero Humanizer Loop CLI (zero third-party dependencies).",
     )
+    parser.add_argument("--version", action="version", version=SKILL_VERSION)
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="<subcommand>")
 
     # 1. check-env
@@ -2255,7 +2342,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_check.add_argument("--skip-update-check", action="store_true", help="Skip remote version check.")
     p_check.add_argument("--force-update-check", action="store_true", help="Bypass 24h cache for remote version check.")
     p_check.add_argument("--update-source-url", default=SKILL_REMOTE_SKILL_MD_URL, help="Override remote SKILL.md URL for version check.")
+    p_check.add_argument("--quick", action="store_true", help="Check credentials and local skill only; skip PDF and remote version checks.")
+    p_check.add_argument("--summary", action="store_true", help="Print a short human-readable setup summary (JSON is the default).")
     p_check.add_argument("--output", default=None, help="Optional path to write UTF-8 JSON report.")
+
+    p_setup = subparsers.add_parser("setup-key", help="Reuse an existing BunnyScholar key or save a new one with hidden input.")
+    p_setup.add_argument("--env-file", type=Path, help="Check and save to this file (default save location: ~/.env).")
+    p_setup.add_argument("--replace", action="store_true", help="Enter a new key even if one is already available.")
 
     # 2. inspect
     p_inspect = subparsers.add_parser(
@@ -2297,11 +2390,14 @@ def build_parser() -> argparse.ArgumentParser:
         "humanize",
         help="Call BunnyScholar humanizer API with cross-process rate limiting, retries, and quality gate.",
     )
-    p_hum.add_argument("--input", required=True, help="Input JSON containing paragraphs list.")
-    p_hum.add_argument("--output", required=True, help="Output JSON file path for unmodified API results.")
+    hum_input = p_hum.add_mutually_exclusive_group(required=True)
+    hum_input.add_argument("--input", type=Path, help="Input JSON containing a list of paragraphs.")
+    hum_input.add_argument("--text-file", help="UTF-8 text file or '-' for stdin; sends the full text as a single request.")
+    p_hum.add_argument("--output", type=Path, help="Output JSON path (required for live requests).")
+    p_hum.add_argument("--dry-run", action="store_true", help="Validate input and estimate billable characters without a key or network request.")
     p_hum.add_argument("--dual-stage", action="store_true", help="Enable needPlagiarismReduction=True.")
     p_hum.add_argument("--rate-limit", type=float, default=DEFAULT_RATE_LIMIT, help="Max requests/sec across processes (default: 20.0).")
-    p_hum.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES, help="Max quality-gate retries per paragraph (default: 3).")
+    p_hum.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES, help="Extra potentially billable quality retries per paragraph (default: 0).")
     p_hum.add_argument("--http-retries", type=int, default=DEFAULT_HTTP_RETRIES, help="Max HTTP 429/5xx attempts per call (default: 3).")
     p_hum.add_argument("--api-url", default=DEFAULT_API_URL, help=f"API endpoint URL (default: {DEFAULT_API_URL}).")
     p_hum.add_argument("--lock-file", default=None, help="Cross-process rate-limit lock file path.")
@@ -2377,11 +2473,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = check_environment(
                 env_paths=args.env_paths,
                 ignore_process_env=bool(args.ignore_process_env),
-                skip_update_check=bool(args.skip_update_check),
+                skip_update_check=args.skip_update_check or (args.quick and not args.force_update_check),
                 force_update_check=bool(args.force_update_check),
                 update_source_url=args.update_source_url,
+                skip_pdf_check=args.quick,
             )
-            emit_result(result, args.output)
+            if args.summary:
+                print_environment_summary(result)
+            if args.output or not args.summary:
+                emit_result(result, args.output)
+            return 0
+
+        if args.command == "setup-key":
+            if not args.replace:
+                explicit_paths = [str(args.env_file)] if args.env_file is not None else None
+                _, existing_source = _read_key_for_runtime_call(
+                    env_paths=explicit_paths,
+                    ignore_process_env=explicit_paths is not None,
+                )
+                if existing_source:
+                    print(f"Using the existing BunnyScholar key from {existing_source} (local check only).")
+                    return 0
+            result = setup_api_key(args.env_file or Path.home() / ".env")
+            print(f"Saved and verified the local key in {result['saved_to']}.")
+            if result["process_env_takes_precedence"]:
+                print(f"{API_KEY_NAME} in the process environment takes precedence over the saved file.")
+            print(f"Before your first paid rewrite, check your balance at {CONSOLE_URL}")
+            print(f"If needed, top up at {RECHARGE_URL}")
             return 0
 
         if args.command == "inspect":
@@ -2417,8 +2535,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.command == "humanize":
             terms = _parse_personal_terms(args.personal_terms)
             run_humanize_batch(
-                input_path=Path(args.input),
-                output_path=Path(args.output),
+                input_path=args.input,
+                output_path=args.output,
                 dual_stage=bool(args.dual_stage),
                 rate_limit=args.rate_limit,
                 max_retries=args.max_retries,
@@ -2435,6 +2553,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 allow_first_person=bool(args.allow_first_person),
                 max_word_len=args.max_word_len,
                 disable_quality_gate=bool(args.disable_quality_gate),
+                text_file=args.text_file,
+                dry_run=args.dry_run,
             )
             return 0
 

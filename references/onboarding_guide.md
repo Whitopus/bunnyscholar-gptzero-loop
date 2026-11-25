@@ -1,78 +1,40 @@
-# 新环境冷启动与凭据配置指南（Onboarding Guide）
+# 初次配置与排错
 
-本指南用于指导 Agent 在全新电脑或零配置环境中，手把手引导新使用者完成 `bunnyscholar-api` 前置安装、`BunnyScholar` API Key 申请、无回显本地持久化、PDF 后端兜底与开工前目标对齐。
+**第一次用 BunnyScholar，先登录账户。** 打开官网，点「登录」，按弹窗提示用微信扫一扫。已有账户但当前浏览器未登录时，也从这里进入。扫码和账号相关操作由用户完成，Agent 可以先准备后面的终端命令。登录后如出现会员推广，可点「暂不开通」，再通过首页「开放平台」进入控制台。 [BunnyScholar 官网](https://bunnyscholar.cn/)
 
----
+**以前配过 Key，或者不确定配过没有？** 在 Skill 目录里运行下面这行。Windows 可把 `python` 换成 `py -3`，macOS / Linux 常用 `python3`。如果当前目录是论文目录，请用脚本的绝对路径。
 
-## 0. 第零步：前置安装 `bunnyscholar-api` 技能
+```sh
+python scripts/humanizer_loop.py check-env --quick --summary
+```
 
-若 `check-env` 报告 `skills.bunnyscholar_api.found` 为 `false`（或需要同步最新线上接口规范），请先执行或引导用户发送以下前置指令：
+探针报告密钥来源和本地 API 文档是否找到。它不会打开 Word、连接服务或产生改写扣费。输出为 `found` 时，可以复用已有配置。对 Agent 而言，缺本地 `bunnyscholar-api` 文件只意味着需要打开官方接口说明。可选的本地安装可以使用同一份文档。 [BunnyScholar 官方 API 说明](https://bunnyscholar.cn/skills/bunnyscholar-api.md)
 
-> **请根据 `https://bunnyscholar.cn/skills/bunnyscholar-api.md`，安装 `bunnyscholar-api`。**
+## 密钥缺失或需要更新
 
----
+1. 在开放平台的左侧菜单打开「API Keys」。从首页点「开放平台」若打开了新标签页，切到新标签页继续。有可用的本地 Key 就复用。没有的话，Agent 可以打开密钥页，填写易辨识的名称（如 `Codex`），并提前给出带完整路径的终端命令。由用户点击「创建 Key」并复制新密钥，直接粘贴到下一步的本地终端。控制台提示只显示一次时，也可以先存到本地密码管理器。 [密钥管理](https://bunnyscholar.cn/developer/keys)
+2. 在**自己的本地终端**执行下面的命令。出现提示后粘贴密钥，输入区保持空白是正常的，直接按 Enter。Agent 可先把实际脚本路径填好，用户只负责粘贴密钥。
 
-## 1. 安全铁律（严禁泄漏密钥）
+   ```sh
+   python scripts/humanizer_loop.py setup-key
+   ```
 
-- **绝对禁止**读取或打印 `~/.env`、项目 `.env` 或插件 `.env` 中的明文内容（严禁 `cat ~/.env`、`printenv`、`echo $BUNNYSCHOLAR_API_KEY`）。
-- **绝对禁止**要求用户在聊天框中直接粘贴 `sk-xxxx` 明文 Key，避免密钥进入对话上下文或日志记录。
-- 始终先执行静默探针：
-  ```bash
-  python scripts/humanizer_loop.py check-env --output env_status.json
-  ```
+3. 看到 `Using the existing BunnyScholar key …` 或 `Saved and verified the local key …` 就已完成本地配置。`setup-key` 默认复用现有 Key，缺失时才录入。想更新就加 `--replace`。默认保存到 `~/.env`，会替换旧的同名条目并保留其他配置。进程环境里的旧 Key 会优先于文件。更新文件后如果快检仍显示 `env:BUNNYSCHOLAR_API_KEY`，请同步更新或清除旧的环境变量，再开新终端或重启 Agent。
 
----
+`setup-key --env-file /path/to/.env` 可自选保存位置。用 `check-env --env-paths /path/to/.env` 和 `humanize --env-paths /path/to/.env` 让两处读取同一个文件。远程 Agent 或云端工作区应在其运行环境配置 `BUNNYSCHOLAR_API_KEY`，本机文件和浏览器会话通常由各环境分别管理。
 
-## 2. 缺失 Key 时的保姆级冷启动引导
+第一次用 Key 改写前，可以看一下开放平台的「用量信息」。赠额和余额够用就可以继续。整篇或多轮处理时可用 `humanize --dry-run` 先看估算计费字符，再对照服务单价决定是否充值。 [查看用量与余额](https://bunnyscholar.cn/developer) · [价格](https://bunnyscholar.cn/developer/pricing) · [充值入口](https://bunnyscholar.cn/developer/recharge)
 
-当 `env_status.json` 中 `api_key.found` 为 `false` 时，Agent 应按以下 3 步引导用户：
+## 遇到什么，下一步做什么
 
-### 第一步：打开 BunnyScholar 开发者控制台
-主动调用内置 `browser` Subagent 打开官方控制台：
-- 控制台入口：`https://bunnyscholar.cn/developer`
-- API Key 管理页：`https://bunnyscholar.cn/developer/keys`
-- 充值入口：`https://bunnyscholar.cn/developer/recharge`
+| 看到的情况 | 下一步 |
+| --- | --- |
+| 找不到 Python 或脚本 | Windows 试 `py -3 --version`，macOS/Linux 试 `python3 --version`。在安装目录执行命令，或让 Agent 给出带引号的完整脚本路径。 |
+| `setup-key` 提示需要本地终端 | 用自己能输入的 PowerShell、终端或 Terminal，运行 Agent 给出的命令。密钥输入是交互步骤，聊天里只需回复配置状态。 |
+| 本地找到 Key，API 返回 `401` / `403` | 核对自检命中的来源，到控制台确认密钥状态。 |
+| BunnyScholar 返回 `402` | 余额不足，可在控制台查看赠额和余额。需要充值时由用户操作。 [充值入口](https://bunnyscholar.cn/developer/recharge) |
+| API 提示输入过长或过短 | 用 `humanize --dry-run` 看计费长度。每次请求需要 20–500 个计费字符。 |
+| 只需纯文本，或者已经有可扫描的 PDF | 可直接继续。只有需要从 Word 导出 PDF 时，才需要 Word 或 LibreOffice。 |
+| 想检查 PDF 导出 | 运行 `check-env --summary --skip-update-check`。若自动导出不可用，可在 Word 中手动另存为 PDF、安装 LibreOffice，或在无需分页时改用文本扫描。 |
 
-礼貌引导用户在可见浏览器窗口中登录账户、领取新用户赠额或按需充值，然后新建一个 `sk-xxxx` 格式的 API Key（**明文仅在创建时展示一次，请立即复制**）。
-
-### 第二步：提供无回显终端命令写入 `~/.env`
-将对应系统的无回显命令发给用户，**并明确提醒新手**：
-> “在终端里输入或粘贴密钥时，屏幕**不会显示任何字符或星号**，这是正常的安全隐藏机制，粘贴后直接按 `Enter` 即可。”
-
-- **Windows PowerShell**（采用无 BOM UTF-8 写入并自动防行粘连）：
-  ```powershell
-  $s = Read-Host -Prompt "Enter BUNNYSCHOLAR_API_KEY (typing hidden)" -AsSecureString; $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); try { $v = [Runtime.InteropServices.Marshal]::PtrToStringAuto($b); $p = Join-Path $HOME ".env"; $enc = [System.Text.UTF8Encoding]::new($false); $pre = if ((Test-Path $p) -and ([System.IO.File]::ReadAllText($p) -notmatch "(\r?\n)$")) { "`n" } else { "" }; [System.IO.File]::AppendAllText($p, "${pre}BUNNYSCHOLAR_API_KEY=$v`n", $enc); Write-Host "Saved to $p" } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
-  ```
-
-- **macOS / Linux Bash / Zsh**：
-  ```bash
-  read -rsp "Enter BUNNYSCHOLAR_API_KEY (typing hidden): " k && echo "" && printf 'BUNNYSCHOLAR_API_KEY=%s\n' "$k" >> ~/.env && unset k && echo "Saved."
-  ```
-
-### 第三步：复跑探针确认就绪
-用户回复“已配置”后，再次运行 `check-env` 确认 `api_key.found` 为 `true`。
-
----
-
-## 3. 无 Word / LibreOffice 兜底与余额不足（HTTP 402）引导
-
-- **若 `word_com` 与 `libreoffice` 均不可用**：
-  - 明确告知用户**不影响核心降 AI 功能**——可直接走 GPTZero 首页**纯文本框粘贴快测**；若需要整篇 PDF 分页检测，可引导用户按需安装免费开源的 [LibreOffice](https://www.libreoffice.org/) 后再试 `export-pdf`。
-- **若调用 `humanize` 遇到 HTTP 402（`insufficient_balance`）**：
-  - 立即暂停并附上充值链接 `https://bunnyscholar.cn/developer/recharge`（拟人改写参考单价约 ¥1 / 千计费字符，英文约 3 个字符计 1 单位），请用户小额充值后回复确认即可无缝继续。
-
----
-
-## 4. 开工前 1 轮极简目标对齐
-
-正式开改前，用 1 句话轻问用户以下 3 项偏好（若用户已在首句说明或希望按默认，直接推进，不啰嗦）：
-1. **期望达标线**：总体/每页希望 AI 率低于多少（默认 `Human >= 85%` / `AI <= 15%`）？
-2. **第一人称限制**：是否禁止出现 `I/we/our`（反思或工科论文可开启 `--allow-first-person`）？
-3. **Word 高亮要求**：是否需要为修订段落或局部短语施加黄色荧光笔高亮？
-
----
-
-## 5. 版本检查与安全更新
-
-- `check-env` 会以 **2 秒超时 + 24 小时临时缓存**非阻塞检查远程版本（弱网/断网自动跳过，绝不卡顿）。
-- 若发现新版本（`update.update_available == true`），请先征得用户同意，再按安装方式执行 `git -C <skill_dir> pull --ff-only` 或 `python scripts/humanizer_loop.py self-update --apply`（绝不触碰 `~/.env` 与用户文档）。
+版本更新与配置可以各自进行。用 `self-update` 检查可用版本，确定要更新时执行 `self-update --apply`。Git 安装也可直接在 Skill 目录执行 `git pull --ff-only`。

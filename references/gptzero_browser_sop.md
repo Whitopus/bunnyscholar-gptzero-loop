@@ -1,63 +1,21 @@
-# GPTZero 内置浏览器自检标准作业程序（Browser SOP）
+# GPTZero 浏览器操作参考
 
-本指南规范 Agent 如何驱动内置 `browser` Subagent 在 `https://app.gptzero.me` 安全、稳定地完成 PDF 分页 AI 检测。
+已有报告、截图或分享链接时，从那份结果开始。新测试用当前宿主可用的浏览器；如果浏览器无法上传或读取文件，用户可以在同一账户自行测试并提供结果。 [GPTZero](https://app.gptzero.me)
 
----
+## 文本或整篇 PDF
 
-## 0. 双轨检测策略与已有报告优先原则（免上传确认弹窗 + 极省 Credits）
+| 目的 | 做法 |
+| --- | --- |
+| 比较几段文字 | 把需要比较的段落粘贴到 GPTZero 文本框，尽量用相同的输入范围与跟踪到的扫描模式。局部结果只代表该次输入。 |
+| 需要分页结果 | 上传匹配当前稿件的 PDF；如果界面提供分页视图，记录页码、分数或标记，并对照 PDF 文本定位 Word 段落。 |
+| 卡在段落标黄或付费提示 | 结果视图、可用功能与额度可能因账户而不同。先查看当前的普通扫描或已有结果，可关闭的推广弹窗可直接关闭。 |
 
-1. **已有报告优先**：若用户已经直接提供了 GPTZero 分享链接（如 `?scanType=bibliography_scan` 等结果页）或检测报告截图，**优先直接读取并分析已有结果**，无需强制重新上传扫描。
-2. **双轨检测策略（减少宿主文件上传确认弹窗）**：
-   - **日常单段/顽固页迭代 ➔ 走首页纯文本框粘贴快测**：直接将改写后的单段纯文本填入 `https://app.gptzero.me` 首页文本框并点击 `Scan`。**完全不触发宿主浏览器的本地文件上传确认弹窗**，且仅消耗该段字数的 credits，不重复浪费已冻结页面的额度。
-   - **ProseMirror 富文本输入技巧**：首页纯文本输入框为 ProseMirror 编辑器，直接 `.fill()` 可能停留在 `0 words` 导致 `Scan` 按钮禁用；须使用 **`keyboard.insertText`**（或聚焦后粘贴/模拟输入）触发字数统计与按钮启用。纯文本模式的免费 `Basic Scan` 不展示句子级标黄（勿点 `See sentence highlighting`，会跳转付费 `?scanType=advanced.sentences`）。
-   - **仅首轮基线与最终交付验收 ➔ 上传整篇 PDF**：使用 `export-pdf --stage-to` 暂存整篇 PDF 上传，获取完整的 `Page by page scan` 分页得分与 PDF 视图黄色高亮。
+某些浏览器中，富文本框经自动填充后字数仍显示零。先聚焦输入框，再用宿主支持的粘贴或文本输入动作。上传路径以宿主浏览器的提示为准，只有上传工具需要文件暂存时才用 `export-pdf --stage-to`。
 
----
+Codex 内置浏览器实测中，游客页提示文本至少 250 个字符，276 字符样例通过粘贴完成了 `Basic Scan`。实际门槛以页面提示为准。若片段过短，可带上连贯的上下文，并说明分数覆盖的文本范围，或者依照已有报告分析。
 
-## 1. 导出并暂存 PDF
+## 登录、限制与结果核对
 
-在启动浏览器上传前，使用 `export-pdf` 生成带完整超链接与黄色高亮的 PDF，并一键暂存至内置浏览器沙箱的 `uploads/` 目录：
-```bash
-python scripts/humanizer_loop.py export-pdf --docx paper.docx --stage-to "<ArtifactDir>/browser_sandbox/uploads" --output pdf_res.json
-```
-> 注：向 `browser` Subagent 传递上传文件名时，仅传单段文件名（如 `paper.pdf`），由其在沙箱 `uploads/` 目录内读取上传。
-
----
-
-## 2. 登录护航与人机校验安全红线
-
-1. **打开检测页**：驱动内置 `browser` Subagent 访问 `https://app.gptzero.me`。
-2. **严禁绕过任何安全或人机校验**：
-   - 一旦页面要求登录，或触发 **hCaptcha / Cloudflare Turnstile** 等“验证您是人类”拦截，Agent **必须立即停止操作并暂停**。
-   - 礼貌引导用户在可见的内置浏览器窗口中手动登录账号并完成人机验证。
-   - **提示用户登录免费账号的价值**：登录免费 GPTZero 账号通常即可获得 **10,000 credits** 以及最关键的 **`Page by page scan`（逐页分页评分）**，稳定性和信息量远高于未登录游客模式。
-3. **复用同一个浏览器会话**：
-   - 当用户完成登录与验证并回复确认后，Agent **必须通过 `send_message` 复用同一个已保留 Cookie 的 `browser` Subagent 会话**接手后续上传与检测，切勿新开无 Cookie 的 `browser` 实例。
-
----
-
-## 3. 弹窗处理、免费额度避坑与视图差异
-
-- **鉴别 `Advanced AI Scan` 假 HTTP 429 弹窗与连环广告自动清理**：
-  - 实测中 GPTZero 首页右侧 `Advanced AI Scan` 默认锁定勾选且**无法取消**（即使免费账号显示 `0 advanced scans left`），导致点击 `Scan` 或上传后必然并发触发 `POST /v3/ai/text` / `/v3/ai-vocab-scan` HTTP 429 并默认跳入 `Advanced` 标签页，随即弹出**最多 3 连套娃营销弹窗**：
-    1. `7 day Free Trial` ➔ 点击右上角 **`×`**；
-    2. `Your first year, 30% off`（无 `×`）➔ 点击底部灰字 **`Pass on premium, continue free`**；
-    3. `Free chrome extension`（无 `×`）➔ 点击底部 **`Maybe later`**（通用兜底：`Close` / `No thanks` / `Skip` / `Esc`）。
-  - **AI Agent 必须自动连环关闭全部垃圾营销弹窗并切回 `Basic Scan`（或 `?scanType=basic`），绝不因此误判为“不可关闭付费阻断”或打扰用户**；只有当 `Basic Scan` 自身报错或免费 credits 归零时，才暂停询问用户换号。
-- **PDF 视图 vs Editor 视图差异**：
-  - 结果页默认的 **PDF 视图** 会以黄色高亮叠加层直接标出 AI 句子，而 **Editor 视图** 仅按单页展示纯文本、不显示黄色高亮；定位高 AI 句时应结合 PDF 视图高亮与本地 `inspect` 文本。
-- **锁定免费检测模式**：日常反复轮测专心使用免费的 **Basic Scan（Model 5.0b）** 与 `Page by page scan`，**默认避开付费 `Advanced` 或 `Hallucination` 标签页**。
-
----
-
-## 4. 额度耗尽与 HTTP 429 换号询问机制
-
-一旦页面出现以下任一情况：
-- 当前账号 `credits` 耗尽；
-- 触发 `HTTP 429` 频率或额度阻断；
-- 弹出无法关闭的强制升级付费拦截；
-
-Agent **必须立即暂停**，向用户清晰汇报当前剩余额度/报错状态，并**主动询问用户**：
-> “当前 GPTZero 账号额度已耗尽或触发限制，请问您是否需要在内置浏览器窗口中退出并切换登录另一个 GPTZero 账号（或改用仅剩的免费模式）？”
-
-若用户选择换号，交由用户在可见窗口手动退出重登（并完成可能出现的新验证码）；用户确认后，Agent 再次通过 `send_message` 复用同一浏览器会话无缝恢复检测。
+- 如果登录、验证码或二次验证阻止继续，用宿主提供的接管方式交给用户。有会话可复用时，接回同一个浏览器继续。可用无登录模式满足需求时可直接完成。
+- 遇到实际额度或频率限制，保留已看到的结果。根据当前界面的信息决定稍后重试、使用已有报告，还是请用户决定是否继续。
+- 记录界面实际显示的分类、分数和扫描范围。没有分页视图时，只提供这次能核实的结果。整篇的 `Human`、`Mixed`、`AI` 跟逐页评分、句子高亮分别按报告自身含义解释。
