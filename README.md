@@ -1,67 +1,67 @@
-# BunnyScholar × GPTZero Humanizer Loop | Bunny学术拟人改写与GPTZero降AI率闭环工作流
+<div align="center">
+
+# BunnyScholar × GPTZero Humanizer Loop
+
+### Bunny学术拟人改写 × GPTZero 论文降 AI 率闭环助手
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Python 3 Stdlib Only](https://img.shields.io/badge/Dependencies-Zero%20Third--Party-brightgreen.svg)](#)
-[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-Standardized-orange.svg)](./SKILL.md)
+[![Python 3 Stdlib Only](https://img.shields.io/badge/Python-3%20Stdlib%20Only-brightgreen.svg)](#)
+[![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-success.svg)](#)
+[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-Antigravity%20%7C%20Claude%20Code%20%7C%20Codex-orange.svg)](./SKILL.md)
 
-**BunnyScholar × GPTZero Humanizer Loop** 是一个可直接开源发布、并在全球新环境中开箱即用的标准化 **Agent Skill** 与零依赖 CLI 工具集。它将“**BunnyScholar（Bunny学术）开放平台拟人改写 API + 内置浏览器 GPTZero 分页自检 + 快照回滚与 OpenXML 无损涂黄**”串联为闭环工作流（曾在实战中将 4 页英文论文从 100% AI 逆转至 4/4 页全部 `Human 99% / 98% / 97% / 87%`）。
+[简体中文](#简体中文) · [English](#english)
 
-**BunnyScholar × GPTZero Humanizer Loop** is a zero-dependency Python 3 CLI and standardized **Agent Skill** designed for an auditable, rollback-safe academic humanization loop—combining the **BunnyScholar Humanizer API**, **in-browser GPTZero page-by-page verification**, **lossless OpenXML `.docx` editing & yellow highlighting**, and **automated snapshot rollback**.
+</div>
 
 ---
 
-## 闭环架构流程 | Loop Architecture
+## 简体中文
+
+### 这是什么？
+
+写英文或中文学术论文时，很多人降 AI 率全靠“抽盲盒”：改完一段去网页测，结果原来过关的页面又红了；好不容易降下来，自己顺手改了一个标点，AI 率瞬间反弹；或者改完后 Word 的字体、行距、超链接全乱了。
+
+**BunnyScholar × GPTZero Humanizer Loop** 是一套开箱即用的标准化 **Agent Skill**。它把 **Bunny学术（BunnyScholar）拟人改写接口**、**内置浏览器 GPTZero 免费实测**、**Word 无损改写与涂黄** 以及 **自动存档回滚** 串成一条闭环（曾在真实 4 页英文作业中，将全篇 `100% AI` 一路压到 4 页全绿 **`Human 99% / 98% / 97% / 87%`**）：
+
+- **过关的页锁死不动**：测完基线后，`Human >= 85%` 或纯白页面直接冻结，只改标黄的页面和段落。
+- **改差了一键退回**：每次动手前自动备份 `.docx`，分数不升反降就一键恢复历史最高分版本。
+- **原排版纹丝不动**：直接修改 Word 底层 XML，Times New Roman 12pt、页边距、行距和可点击超链接原封不动，还能按作业要求对指定段落或局部短语精准涂黄。
+- **不装任何第三方库**：脚本 100% 用 Python 3 自带标准库写成，新电脑无需安装 `uv`、`python-docx` 或 `pymupdf`。
+
+### 为什么比手动改更省心？
+
+| 常见痛点 | 使用本 Skill 后的做法 |
+| :--- | :--- |
+| **手改一两句就反弹** | 接口返回文本**一字不改**直写回 Word；发现语义不对只改源稿或重刷，绝不手改成品 |
+| **传文件总弹确认、烧额度** | **双轨检测**：单段迭代走首页文本框快测（免上传弹窗、极省 credits）；仅首尾才传 PDF 看分页 |
+| **GPTZero 广告弹窗烦人** | 自动连环关掉 3 层试用/折扣/插件广告弹窗并切回免费 `Basic Scan (Model 5.0b)`，不打扰用户 |
+| **改完不知道花了多少** | 结束时自动汇总**透明战报**：整体/每页/每段 AI 率变化、哪段改了最久、两个平台各花了多少钱 |
+| **担心泄漏论文或密钥** | `.gitignore` 默认屏蔽 `.env` 与所有 `.docx`/`.pdf`；探针绝不读明文 Key；绝不绕过人机验证 |
+
+### 闭环怎么跑？
 
 ```mermaid
 flowchart LR
-    A["1. check-env & inspect<br/>(静默环境探针与文档解析)"] --> B["2. snapshot & export-pdf<br/>(基线备份与PDF导出)"]
-    B --> C["3. Browser Subagent<br/>(GPTZero Basic 5.0b 分页基线)"]
-    C --> D{"4. 分页达标判断<br/>Human >= 85%?"}
-    D -- "Yes (达标)" --> E["Freeze 冻结该页段落"]
-    D -- "No (标黄 / AI 100%)" --> F["5. 源稿去八股 + humanize<br/>(限流/门禁重刷/可选 dual-stage)"]
-    F --> G["6. apply (一字不改直写 + 涂黄)"]
-    G --> H["7. export-pdf 复测 & snapshot"]
-    H --> I{"得分提升?"}
-    I -- "No (退化)" --> J["rollback --best 恢复最高分"]
-    I -- "Yes (全部达标)" --> K["交付最终 .docx 与报告"]
+    A["1. 环境自检与解析<br/>(check-env & inspect)"] --> B["2. 基线存档与测分<br/>(snapshot & Basic Scan)"]
+    B --> C{"3. 该页 Human >= 85%?"}
+    C -- "是 (已达标)" --> D["冻结该页段落不动"]
+    C -- "否 (标黄 / AI 100%)" --> E["4. 源稿去八股 + Bunny学术改写<br/>(自动门禁 / 可选 dual-stage)"]
+    E --> F["5. 一字不改写回 Word + 涂黄<br/>(apply)"]
+    F --> G["6. 文本框快测 / PDF 分页复测"]
+    G --> H{"分数更好?"}
+    H -- "否 (退化)" --> I["rollback --best 退回最高分"]
+    H -- "是 (全部通关)" --> J["输出最终文件与透明战报"]
 ```
 
----
+### 3 步快速上手
 
-## 核心亮点 | Key Highlights
-
-- **零第三方依赖（Zero-Dependency CLI）**：`scripts/humanizer_loop.py` 100% 基于 Python 3 标准库（`zipfile`、`xml.etree.ElementTree`、`urllib`、`argparse`、`msvcrt`/`fcntl`），兼容 `python`、`python3` 与 `uv run`，新电脑无需安装 `python-docx`、`pymupdf` 或 `uv`。
-- **灵活裁剪原则（Flexible by Design）**：严守 5 条不可破红线（绝不手改返回句、不泄漏 Key、不绕过人机校验、保留排版超链接、达标页冻结），其余流程高度灵活——支持纯文本轻量直调、双轨检测（局部文本框粘贴快测免上传确认弹窗 + 首尾 PDF 分页验收）、`--allow-first-person`、`--language` / `--platform` 自由切换及 `highlight_substrings` 局部涂黄。
-- **OpenXML 无损手术与透明战报**：直接读写 `word/document.xml`，完整保留原有页边距、行距、字体（如 Times New Roman 12pt）、引文与 `<w:hyperlink>` 关系节点；支持 UTF-8 BOM JSON 兼容；闭环结束自动汇总整体/逐页/逐段 AI 率、顽固段复盘与双平台额度成本对账。
-- **跨进程限流与智能门禁**：基于 `time.monotonic()` + 跨进程文件锁严格限流（默认 ≤ 20 req/s），支持 HTTP `429`/`5xx` 指数退避重试；自动忽略 URL 与直接引语中的误报，拦截非引语第一人称、超长乱码词或丢失 `[n]` 引文并自动重刷。
-
----
-
-## 7 个标准化 CLI 子命令 | CLI Subcommands
-
-| 子命令 (`Subcommand`) | 功能说明 (`Description`) |
-| :--- | :--- |
-| `check-env` | 静默探测 `BUNNYSCHOLAR_API_KEY`、PDF 后端（Word COM / `soffice`）及 `bunnyscholar-api` 前置安装 |
-| `inspect` | 解析 `.docx` 正文角色（`body_para_indices`）、硬分页、黄色高亮分布、引文 `[1]..[N]` 与第一人称（自动忽略 URL/直接引语） |
-| `snapshot` | 备份 `.docx` 至 `.snapshots/v{N}_{timestamp}.docx` 并记录 GPTZero 实测分数至 `history.json` |
-| `rollback` | 查看快照得分对比表（`--list`），恢复指定版本（`--version`）或历史最高分（`--best`） |
-| `humanize` | 限流调用 `POST /api/open/humanizer`（支持 `--dual-stage`、`--language`、`--platform`、`--allow-first-person` 等） |
-| `apply` | 将 API 原文**一字不改**写入指定段落，支持 `--highlight-paras` 整段涂黄与 `highlight_substrings` 局部涂黄 |
-| `export-pdf` | Windows 优先 Word COM 导出（保超链接与高亮），跨平台兜底 LibreOffice `soffice`，支持 `--stage-to` |
-
----
-
-## 新环境从零配置 | Quick Setup
-
-### 0. 前置安装 `bunnyscholar-api` | Prerequisite
-
-在对话中先对你的 Agent 发送以下前置指令（或确认已安装）：
+#### 第 1 步：前置安装 `bunnyscholar-api`
+在对话中先给你的 AI 助手发一句：
 ```text
 请根据 https://bunnyscholar.cn/skills/bunnyscholar-api.md，安装 bunnyscholar-api。
 ```
 
-### 1. 安装 Skill | Install the Skill
-
+#### 第 2 步：安装本 Skill
 - **Google Antigravity（全局安装）**：
   ```bash
   git clone https://github.com/<your-org>/bunnyscholar-gptzero-loop.git ~/.gemini/config/skills/bunnyscholar-gptzero-loop
@@ -70,14 +70,13 @@ flowchart LR
   ```bash
   git clone https://github.com/<your-org>/bunnyscholar-gptzero-loop.git ~/.claude/skills/bunnyscholar-gptzero-loop
   ```
-- **Codex / 项目级通用（`.agents/skills/`）**：
+- **Codex / 通用项目级（`.agents/skills/`）**：
   ```bash
   git clone https://github.com/<your-org>/bunnyscholar-gptzero-loop.git .agents/skills/bunnyscholar-gptzero-loop
   ```
 
-### 2. 安全配置 BunnyScholar API Key | Configure API Key Safely
-
-前往 [BunnyScholar 开发者控制台](https://bunnyscholar.cn/developer) 创建 `sk-xxxx` 密钥后，使用**无回显终端命令**写入 `~/.env`（切勿在聊天窗口粘贴明文 Key）：
+#### 第 3 步：安全配置 BunnyScholar API Key
+前往 [BunnyScholar 开发者控制台](https://bunnyscholar.cn/developer) 领额并创建 `sk-xxxx` 密钥，用**无回显终端命令**写入 `~/.env`（切勿在聊天框粘贴明文 Key）：
 
 - **Windows PowerShell**：
   ```powershell
@@ -88,15 +87,90 @@ flowchart LR
   read -rsp "Enter BUNNYSCHOLAR_API_KEY (typing hidden): " k && echo "" && printf 'BUNNYSCHOLAR_API_KEY=%s\n' "$k" >> ~/.env && unset k && echo "Saved."
   ```
 
-### 3. 验证环境 | Verify Environment
-
+运行环境自检确认就绪：
 ```bash
 python scripts/humanizer_loop.py check-env --output env_status.json
 ```
 
+### 内置工具箱（按需调用，不绑死 AI 助手）
+
+| 子命令 | 作用 |
+| :--- | :--- |
+| `check-env` | 静默检查 `BUNNYSCHOLAR_API_KEY`、PDF 导出后端（Word COM / `soffice`）及前置技能 |
+| `inspect` | 解析 `.docx` 正文段号（自动区分页眉与正文）、字数、高亮、引文与非引语第一人称 |
+| `snapshot` | 备份 `.docx` 到 `.snapshots/`，并记录对应版本的 GPTZero 实测得分 |
+| `rollback` | 查看历史版本得分对比表（`--list`），一键回滚指定版本（`--version`）或最高分（`--best`） |
+| `humanize` | 跨进程限流调用 Bunny学术拟人接口（支持 `--dual-stage`、`--language`、`--platform`、`--allow-first-person`） |
+| `apply` | 将接口返回原文**一字不改**写回 Word，支持整段涂黄（`--highlight-paras`）与局部短语涂黄（`highlight_substrings`） |
+| `export-pdf` | Windows 优先 Word COM 导出（完整保留超链接与黄色高亮），其他系统自动兜底 LibreOffice |
+
+<details>
+<summary>点击查看仓库目录结构</summary>
+
+```text
+bunnyscholar-gptzero-loop/
+├── SKILL.md                        # Agent Skill 主规范（核心红线、灵活策略与战报模板）
+├── README.md                       # 中英双语说明文档
+├── LICENSE                         # MIT 开源协议
+├── .gitignore                      # 严格屏蔽 .env、.docx、.pdf、.snapshots 与日志
+├── .env.example                    # 密钥配置模板（不含真实密钥）
+├── scripts/
+│   └── humanizer_loop.py           # 100% Python 3 标准库零依赖 CLI
+└── references/
+    ├── onboarding_guide.md         # 新环境冷启动与无回显 Key 录入指南
+    ├── gptzero_browser_sop.md      # GPTZero 双轨快测、广告弹窗清理与人机校验边界 SOP
+    └── anti_ai_playbook.md         # 分页冻结、先一后二与顽固页破局实战手册
+```
+
+</details>
+
 ---
 
-## 开源协议与隐私声明 | License & Privacy
+## English
 
-- 本项目基于 [MIT License](./LICENSE) 开源发布。
-- `.gitignore` 已默认忽略 `.env`、`.env.*`、`.snapshots/`、`*.docx`、`*.pdf`、`*_log.json` 与 `__pycache__/`，确保用户个人论文文档与 API 密钥绝不会被意外提交至远程仓库。
+### What It Does
+
+Lowering AI-detection scores on academic papers often turns into a frustrating guessing game: fixing one page breaks another, tweaking a single punctuation mark triggers a false positive, and editing Word files by hand ruins fonts, margins, or clickable hyperlinks.
+
+**BunnyScholar × GPTZero Humanizer Loop** is a zero-dependency, ready-to-use **Agent Skill** that connects **BunnyScholar's Humanizer API**, **in-browser GPTZero verification**, **lossless OpenXML `.docx` editing**, and **automatic snapshot rollback**. In real-world coursework, this workflow turned a 4-page `100% AI` draft into **`99% / 98% / 97% / 87% Human`** across all four pages.
+
+- **Page-by-Page Freeze**: Pages scoring `Human >= 85%` (or clean white) are locked untouched; only flagged sections are iterated.
+- **Instant Rollback**: Every edit snapshots the `.docx` first—if a round scores worse, roll back to the historical best with one command.
+- **Lossless Word Formatting**: Directly edits `word/document.xml` using Python's stdlib (`zipfile` + `xml.etree.ElementTree`), keeping fonts, spacing, margins, and `<w:hyperlink>` nodes intact while supporting paragraph-level or phrase-level yellow highlighting.
+- **Zero Third-Party Dependencies**: Runs out of the box with standard Python 3—no `uv`, `python-docx`, or `pymupdf` required.
+
+### Why Use It
+
+- **No Accidental Post-Edits**: Writes API outputs back verbatim without LLM paraphrasing, preventing sudden AI-score spikes.
+- **Dual-Track Scanning**: Uses homepage paste-scanning for fast single-paragraph checks (no repeated file-upload prompts, minimal credit burn) and reserves full PDF uploads for baseline and final page-by-page verification.
+- **Auto-Dismisses Promo Modals**: Automatically closes GPTZero's multi-step upgrade/extension popups and switches to free `Basic Scan (Model 5.0b)`.
+- **Transparent Final Report**: Summarizes overall/page/paragraph score changes, stubborn-paragraph retries, GPTZero credits used, and exact BunnyScholar API cost.
+- **Privacy First**: `.gitignore` blocks `.env`, `.docx`, `.pdf`, and `.snapshots/`; never echoes API keys or bypasses CAPTCHAs.
+
+### Quick Start
+
+1. **Install Prerequisite (`bunnyscholar-api`)**:
+   Ask your AI agent:
+   ```text
+   Please install bunnyscholar-api according to https://bunnyscholar.cn/skills/bunnyscholar-api.md.
+   ```
+2. **Clone into Your Agent's Skills Directory**:
+   ```bash
+   # Google Antigravity
+   git clone https://github.com/<your-org>/bunnyscholar-gptzero-loop.git ~/.gemini/config/skills/bunnyscholar-gptzero-loop
+   ```
+3. **Save Your API Key Safely** (get a key at `https://bunnyscholar.cn/developer`, never paste it in chat):
+   ```bash
+   # macOS / Linux Bash
+   read -rsp "Enter BUNNYSCHOLAR_API_KEY (typing hidden): " k && echo "" && printf 'BUNNYSCHOLAR_API_KEY=%s\n' "$k" >> ~/.env && unset k && echo "Saved."
+   ```
+   Verify your setup:
+   ```bash
+   python scripts/humanizer_loop.py check-env --output env_status.json
+   ```
+
+---
+
+## License
+
+Released under the [MIT License](./LICENSE).
