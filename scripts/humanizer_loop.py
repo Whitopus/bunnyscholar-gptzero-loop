@@ -42,7 +42,7 @@ DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 LOGIN_URL = "https://bunnyscholar.cn/"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
-SKILL_VERSION = "1.2.2"
+SKILL_VERSION = "1.2.3"
 SUPPORTED_HUMANIZER_LANGUAGES: Tuple[str, ...] = ("en", "zh_CN")
 SUPPORTED_PLATFORMS_BY_LANGUAGE: Dict[str, Tuple[str, ...]] = {
     "zh_CN": ("cnki", "wanfang", "weipu", "gezida", "daya", "turnitin"),
@@ -2037,6 +2037,23 @@ def _parse_personal_terms(raw: Optional[str]) -> Optional[List[str]]:
     return terms or None
 
 
+def _matching_personal_terms(text: str, terms: Sequence[str]) -> List[str]:
+    """查找原样出现的术语，忽略大小写及空白差异。"""
+    normalized_text = " ".join(text.split())
+    matched = []
+    # ASCII 术语按词边界比较，允许它紧邻中文文字。
+    word_chars = r"[A-Za-z0-9_]"
+    for term in dict.fromkeys(terms):
+        phrase = " ".join(term.split())
+        if not phrase:
+            continue
+        prefix = rf"(?<!{word_chars})" if re.fullmatch(word_chars, phrase[0]) else ""
+        suffix = rf"(?!{word_chars})" if re.fullmatch(word_chars, phrase[-1]) else ""
+        if re.search(f"{prefix}{re.escape(phrase)}{suffix}", normalized_text, re.IGNORECASE):
+            matched.append(term)
+    return matched
+
+
 def run_humanize_batch(
     input_path: Optional[Path],
     output_path: Optional[Path],
@@ -2120,6 +2137,12 @@ def run_humanize_batch(
     if dry_run:
         total_billable = sum(item[2] for item in validated_items)
         est_cost = round((total_billable / 1000.0) * HUMANIZER_REF_UNIT_PRICE_CNY, 4)
+        paragraphs: List[Dict[str, Any]] = []
+        for para_index, src_text, billable in validated_items:
+            paragraph: Dict[str, Any] = {"para_index": para_index, "billable_chars_estimated": billable}
+            if personal_terms:
+                paragraph["matched_personal_terms"] = _matching_personal_terms(src_text, personal_terms)
+            paragraphs.append(paragraph)
         preview: Dict[str, Any] = {
             "dry_run": True,
             "language": language,
@@ -2131,10 +2154,7 @@ def run_humanize_batch(
                 f"Reference unit price: {HUMANIZER_REF_UNIT_PRICE_CNY} CNY / 1000 billable chars "
                 "(credits used before cash balance; live pricing: https://bunnyscholar.cn/developer/pricing)."
             ),
-            "paragraphs": [
-                {"para_index": para_index, "billable_chars_estimated": billable}
-                for para_index, _, billable in validated_items
-            ],
+            "paragraphs": paragraphs,
         }
         if dry_warnings:
             preview["warnings"] = dry_warnings
@@ -2208,7 +2228,7 @@ def run_humanize_batch(
         if not passed:
             failed_paras.append(para_index)
 
-        results.append({
+        result: Dict[str, Any] = {
             "para_index": para_index,
             "source_text": src_text,
             "text": last_text,
@@ -2218,7 +2238,19 @@ def run_humanize_batch(
             "quality_issues": last_issues,
             "attempts_used": attempts_used,
             "usage": last_usage,
-        })
+        }
+        if personal_terms:
+            matched_terms = _matching_personal_terms(src_text, personal_terms)
+            kept_terms = set(_matching_personal_terms(last_text, matched_terms))
+            missing_terms = [term for term in matched_terms if term not in kept_terms]
+            result["matched_personal_terms"] = matched_terms
+            result["missing_personal_terms"] = missing_terms
+            if missing_terms:
+                log_stderr(
+                    f"Warning: paragraph {para_index} is missing {len(missing_terms)} requested term(s); "
+                    "see missing_personal_terms in the result."
+                )
+        results.append(result)
 
     output_payload = {
         "api_url": api_url,
@@ -2487,7 +2519,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_hum.add_argument("--api-url", default=DEFAULT_API_URL, help=f"API endpoint URL (default: {DEFAULT_API_URL}).")
     p_hum.add_argument("--lock-file", default=None, help="Cross-process rate-limit lock file path.")
     p_hum.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="HTTP request timeout in seconds (default: 30.0).")
-    p_hum.add_argument("--personal-terms", default=None, help="Comma-separated or JSON array of terms to preserve.")
+    p_hum.add_argument(
+        "--personal-terms", default=None,
+        help="Comma-separated terms or a JSON array; sent to BunnyScholar and checked in the final candidate.",
+    )
     p_hum.add_argument("--env-paths", nargs="+", default=None, help="Override .env file paths for API key lookup.")
     p_hum.add_argument("--ignore-process-env", action="store_true", help="Ignore BUNNYSCHOLAR_API_KEY in process env.")
     p_hum.add_argument(

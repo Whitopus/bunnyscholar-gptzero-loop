@@ -19,9 +19,21 @@ Word 文件可先用 `inspect --docx paper.docx` 查看段落索引、引文、�
 }
 ```
 
-输入过长时按自然语义切分，改写后合并到原 Word 段号。`humanize` 保存 API 返回的文本与质量提示。要重点保留的术语可用 `--personal-terms`。`--allow-first-person` 适合原本就使用第一人称的文章，`--allow-quality-warnings` 保留提示并让可人工复核的批次正常完成。质量检查默认只评估当次结果，`--max-retries N` 用于显式选择额外改写尝试。`--dual-stage` 会先降重再拟人化，适合用户同时需要两个指标并接受较大改动时。
+输入过长时按自然语义切分，改写后合并到原 Word 段号。`humanize` 保存 API 返回的文本与质量提示。`--allow-first-person` 适合原本就使用第一人称的文章，`--allow-quality-warnings` 保留提示并让可人工复核的批次正常完成。质量检查默认只评估当次结果，`--max-retries N` 用于显式选择额外改写尝试。`--dual-stage` 会先降重再拟人化，适合用户同时需要两个指标并接受较大改动时。
 
 用 `apply --highlight-paras 6,7` 涂黄整段。要涂黄短语，在供 `apply` 读取的结果 JSON 里为相应段落加入 `"highlight_substrings": ["exact phrase"]`。仅在用户要求清理已有高亮时使用 `--clear-other-highlights`。常见样式和超链接可由脚本保留，改到包含链接、公式、复杂行内样式或引用的段落时，打开交付稿核对。
+
+<a id="personal-terms"></a>
+
+## 保留术语和关键短语
+
+用 `--personal-terms` 将专名、实验术语或需要保留措辞的短语传给 BunnyScholar 的术语白名单。优先用原文中的写法。BunnyScholar 的接口说明将英文和降重步骤描述为尽量保留，中文拟人改写中的术语、数字和公式由模型处理。 [BunnyScholar API 说明](https://bunnyscholar.cn/skills/bunnyscholar-api.md)
+
+```sh
+python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output result.json --personal-terms "VALORANT,Riot Games,twenty-four hours"
+```
+
+带逗号的术语用 JSON 字符串数组传入。用 `--dry-run` 可先查看每段命中的 `matched_personal_terms`。改写结果用 `missing_personal_terms` 提示原文中出现、候选中未按相同措辞出现的术语，比较忽略大小写和空白差异。像 `twenty-four hours` 写成 `24 hours` 也会列出，方便结合语义核对。提示本身不会触发付费重试。
 
 ## 决定是否再做一轮
 

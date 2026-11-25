@@ -92,6 +92,8 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output res
 
 默认按英文 GPTZero 处理；中文知网只需追加 `--language zh_CN`（会自动默认 `cnki`）。多段或需对应 Word 段号时改用 `--input paragraphs.json`。[JSON 示例与 Word 操作](references/anti_ai_playbook.md)
 
+**保留关键词**。直接告诉 Agent 哪些词要原样保留，或在命令后加 `--personal-terms "VALORANT,Riot Games,twenty-four hours"`。改写后，若原文中的这些词没按原措辞出现，脚本会提示核对。 [术语白名单用法](references/anti_ai_playbook.md#personal-terms)
+
 | 命令 | 何时用 |
 | :--- | :--- |
 | `check-env --quick --summary` | 查看 Python、Key 来源与本地 API 说明。Agent 可省去 `--summary` 读取 JSON。 |
@@ -173,6 +175,8 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output res
 ```
 
 English/GPTZero are the defaults. For Word, use `inspect` to locate paragraph IDs and `apply --output-docx` to save a revised copy.
+
+Pass `--personal-terms "first term,second phrase"` to request term preservation. The result flags selected terms from the input that are absent in the candidate. [Term preservation](references/anti_ai_playbook.md#personal-terms)
 
 To sign in or switch accounts, have the agent open the relevant screen, hand it over for verification or account selection, and resume the task when you return control. BunnyScholar's web session and CLI key can be switched independently. [GPTZero sign-in and account switching](references/gptzero_browser_sop.md#sign-in-and-switch) · [BunnyScholar account switching](references/onboarding_guide.md#switch-accounts)
 

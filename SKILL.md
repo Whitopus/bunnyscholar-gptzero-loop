@@ -3,7 +3,7 @@ name: bunnyscholar-gptzero-loop
 description: >-
   Use BunnyScholar's Humanizer API for Chinese or English text, optionally review GPTZero results, and apply selected revisions to Word. Use for 拟人改写、降 AI 率、GPTZero 报告复核 or reversible DOCX revisions.
 metadata:
-  version: "1.2.2"
+  version: "1.2.3"
   source: https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main/SKILL.md
   repo: https://github.com/Whitopus/bunnyscholar-gptzero-loop
 ---
@@ -34,5 +34,6 @@ Follow the user's text, language, target platform, scope, and deliverable. Use t
 - Keep credentials in the user's terminal or environment, outside chat and logs. `setup-key` reuses a configured key automatically. If it needs a new key, the user's interactive terminal handles hidden input and verifies the saved file. Authentication and balance are determined by the service.
 - A live rewrite sends the selected text to BunnyScholar and can incur charges. After first-time setup, point the user to [usage and balance](https://bunnyscholar.cn/developer) and let them know they can [top up](https://bunnyscholar.cn/developer/recharge) if needed. For a larger batch, a local length estimate can help the user decide. An online scan sends content to the detector. Use the services within the requested scope and respect any budget or round limit.
 - Preserve the original API response as a candidate. Before accepting it, compare the source's key claims, numbers (including spelled-out quantities), units, qualifiers, and citations. A passed CLI quality check covers only its heuristics. Keep the original paragraph if the result loses a fact or changes its meaning. Attribute detector scores to the exact version scanned, comparing overall and page-level results where relevant. See the [Word and iteration notes](references/anti_ai_playbook.md).
+- When particular wording matters, pass the user's terms or a short list of names, technical terms, and key phrases from the source via `--personal-terms`. Review `missing_personal_terms` in the candidate and check whether any wording change also changes the meaning. This is an advisory check. See the [term preservation example](references/anti_ai_playbook.md#personal-terms).
 
 Report the requested deliverables with relevant changes, any scans actually run, and the usage reported by the service when available. If the user wants a GPTZero report file, collect the native PDF report for the exact version scanned when the account offers it. See the [report export steps](references/gptzero_browser_sop.md#export-report). If there is no new measurement, say so. A newer Skill version can be mentioned when relevant and handled separately from the task. See [CLI examples](README.md#cli-tools).
