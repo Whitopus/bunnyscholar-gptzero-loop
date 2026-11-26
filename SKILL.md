@@ -3,7 +3,7 @@ name: bunnyscholar-gptzero-loop
 description: >-
   Use BunnyScholar's Humanizer API for Chinese or English text, optionally review GPTZero results, and apply selected revisions to Word. Use for 拟人改写、降 AI 率、GPTZero 报告复核 or reversible DOCX revisions.
 metadata:
-  version: "1.2.6"
+  version: "1.3.0"
   source: https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main/SKILL.md
   repo: https://github.com/Whitopus/bunnyscholar-gptzero-loop
 ---
@@ -18,9 +18,9 @@ Follow the user's text, language, target platform, scope, and deliverable. Use t
 | --- | --- |
 | First-time setup | If a key may already exist, run `check-env --quick --summary` and reuse it when found. For a new account, open BunnyScholar's homepage for sign-in. After the user signs in, resume in the same browser, open API Keys, and fill a convenient name if the browser supports it. Give the user the exact `setup-key` command before they create the key and paste it in their terminal. See the [setup guide](references/onboarding_guide.md). |
 | Check or update the Skill | Run `self-update` to check the installed version. If the user asks to update, run `self-update --apply`, verify the reported version, and read the updated Skill before continuing. See the [update instructions](README.md#update). |
-| Rewrite pasted text or a short text file | Read the selected text and identify what needs preserving before the first rewrite. Use `humanize --text-file paragraph.txt --output result.json --allow-quality-warnings` for one paragraph, or `--input` with JSON for a batch. Use `--dry-run` when useful for checking length or estimating usage. Return a candidate and call out meaning or terminology issues that need review. |
+| Rewrite pasted text or a short text file | Read the selected text and identify what needs preserving before the first rewrite. Use `humanize --text-file paragraph.txt --output result.json --allow-quality-warnings` for one paragraph, or `--input` with JSON for a batch (each completed paragraph is checkpointed; pass `--resume` to continue an interrupted batch without re-billing). Use `--dry-run` when useful for checking length or estimating usage. Return a candidate and call out meaning or terminology issues that need review. |
 | Interpret a GPTZero report | Start with the supplied report, screenshot, or share link. If the user wants a fresh result, use the available browser or ask for a new report only when access is blocked. See [GPTZero browser notes](references/gptzero_browser_sop.md). |
-| Revise an existing Word file | Use `inspect` to identify paragraph IDs and compare them with the report. Work on a copy via `apply --output-docx` or keep a snapshot when editing in place. Check the affected paragraphs and layout. Export and scan a PDF only when page-level results matter. See the [Word and iteration notes](references/anti_ai_playbook.md). |
+| Revise an existing Word file | Use `inspect` to identify paragraph IDs and compare them with the report. Work on a copy via `apply --output-docx` or keep a snapshot when editing in place (`apply` refuses to overwrite paragraphs containing embedded images, drawings, or footnote/endnote references). Check the affected paragraphs and layout. Export and scan a PDF only when page-level results matter. See the [Word and iteration notes](references/anti_ai_playbook.md). |
 
 ## Decide what to preserve before rewriting
 

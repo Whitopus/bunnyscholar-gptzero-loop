@@ -7,6 +7,7 @@ import argparse
 import copy
 import getpass
 import hashlib
+import http.client
 import io
 import json
 import math
@@ -14,6 +15,7 @@ import os
 import platform
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -44,7 +46,7 @@ DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 LOGIN_URL = "https://bunnyscholar.cn/"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
-SKILL_VERSION = "1.2.6"
+SKILL_VERSION = "1.3.0"
 SUPPORTED_HUMANIZER_LANGUAGES: Tuple[str, ...] = ("en", "zh_CN")
 SUPPORTED_PLATFORMS_BY_LANGUAGE: Dict[str, Tuple[str, ...]] = {
     "zh_CN": ("cnki", "wanfang", "weipu", "gezida", "daya", "turnitin"),
@@ -72,7 +74,41 @@ RECHARGE_URL = "https://bunnyscholar.cn/developer/recharge"
 DEFAULT_RATE_LIMIT = 20.0
 DEFAULT_MAX_RETRIES = 0
 DEFAULT_HTTP_RETRIES = 3
-DEFAULT_TIMEOUT = 30.0
+# 拟人改写（尤其是 --dual-stage）可能需要较长处理时间；超时后重发可能被重复计费，因此默认值放宽
+DEFAULT_TIMEOUT = 60.0
+MAX_BACKOFF_SECONDS = 60.0
+HUMANIZER_MIN_BILLABLE = 20
+HUMANIZER_MAX_BILLABLE = 500
+
+# 网络层可重试异常：Python 3.8/3.9 中 socket.timeout 不是 TimeoutError 的子类，需单独列出
+RETRYABLE_NETWORK_ERRORS: Tuple[type, ...] = (
+    urllib.error.URLError,
+    TimeoutError,
+    socket.timeout,
+    ConnectionError,
+    http.client.HTTPException,
+)
+
+# BunnyScholar 官方错误码对应的处理建议（见官方 API 说明「七、错误码」）
+API_ERROR_HINTS: Dict[str, str] = {
+    "MISSING_API_KEY": "No API key was sent; run setup-key or set BUNNYSCHOLAR_API_KEY.",
+    "INVALID_API_KEY": "The API key is invalid; check it in the console.",
+    "INACTIVE_API_KEY": "The API key is disabled; enable it or create a new key in the console.",
+    "insufficient_balance": "Insufficient balance; top up before retrying.",
+    "text_too_short": "Text is too short; merge it with neighbouring text (20-500 billable chars).",
+    "text_too_long": "Text is too long; split it at sentence boundaries (20-500 billable chars).",
+    "unsupported_language": "The humanizer only accepts language 'zh_CN' or 'en'.",
+    "rate_limit_exceeded": "Rate limit exceeded; lower --rate-limit and retry later.",
+}
+
+# 段落内这些节点在 apply 重建时无法安全定位，遇到即拒绝改写，避免静默丢失图片或脚注引用
+APPLY_BLOCKING_TAGS: Dict[str, str] = {
+    "drawing": "inline image or chart (<w:drawing>)",
+    "pict": "legacy VML picture (<w:pict>)",
+    "object": "embedded object (<w:object>)",
+    "footnoteReference": "footnote reference (<w:footnoteReference>)",
+    "endnoteReference": "endnote reference (<w:endnoteReference>)",
+}
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -159,6 +195,10 @@ class QualityGateError(RuntimeError):
     """质量门禁重刷次数耗尽仍未通过的异常。"""
 
 
+class BatchInterruptedError(RuntimeError):
+    """批量改写中途失败；已完成段落已写入输出文件，可用 --resume 续跑。"""
+
+
 # ==============================================================================
 # 通用工具函数
 # ==============================================================================
@@ -172,10 +212,8 @@ def emit_result(data: Dict[str, Any], output_path: Optional[str]) -> None:
     """统一输出结果：指定 --output 时写 UTF-8 JSON 文件并在 stdout 打印简要提示，否则直接打印 JSON。"""
     if output_path:
         out = Path(output_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with out.open("w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+        # 原子写入，避免中断时留下半截 JSON 覆盖上一轮结果
+        atomic_write_json(out, data)
         print(f"Success! Result written to: {out}")
     else:
         print(json.dumps(data, indent=2, ensure_ascii=False))
@@ -285,7 +323,11 @@ def register_ooxml_namespaces(xml_bytes: bytes) -> List[Tuple[str, str]]:
             if not seen_root:
                 root_namespaces.append((prefix, uri))
             if prefix:
-                ET.register_namespace(prefix, uri)
+                try:
+                    ET.register_namespace(prefix, uri)
+                except ValueError:
+                    # ElementTree 保留 ns\d+ 形式前缀，这类前缀交由序列化器自动命名
+                    pass
         elif event == "start" and not seen_root:
             seen_root = True
     return root_namespaces
@@ -951,6 +993,30 @@ def _extract_run_text_and_highlight(r_elem: ET.Element) -> Tuple[str, Optional[s
     return "".join(parts), highlight_val
 
 
+def find_apply_blockers(p_elem: ET.Element) -> List[str]:
+    """列出段落中会阻止 apply 安全重写的结构（域代码、公式、图片、对象、脚注/尾注引用）。"""
+    blockers: List[str] = []
+    if p_elem.find(f".//{w_tag('fldChar')}") is not None or p_elem.find(f".//{w_tag('fldSimple')}") is not None:
+        blockers.append("Word field code (<w:fldChar>/<w:fldSimple>)")
+    if any(el.tag.endswith("}oMath") or el.tag.endswith("}oMathPara") for el in p_elem.iter()):
+        blockers.append("math equation (<m:oMath>)")
+    for local_name, label in APPLY_BLOCKING_TAGS.items():
+        if p_elem.find(f".//{w_tag(local_name)}") is not None:
+            blockers.append(label)
+    return blockers
+
+
+def find_flatten_notes(p_elem: ET.Element) -> List[str]:
+    """列出 apply 重建时会被扁平化（不报错但会改变结构）的段落特征，用于生成提示。"""
+    notes: List[str] = []
+    revision_tags = (w_tag("ins"), w_tag("del"), w_tag("moveFrom"), w_tag("moveTo"))
+    if any(el.tag in revision_tags for el in p_elem.iter()):
+        notes.append("tracked changes are accepted (insertions kept, deletions dropped)")
+    if p_elem.find(f".//{w_tag('sdt')}") is not None:
+        notes.append("content-control wrappers are removed (text kept)")
+    return notes
+
+
 def expand_citation_group(inner: str) -> Optional[List[int]]:
     """展开方括号引文内容（如 '1, 3-5' -> [1, 3, 4, 5]），自动跳过年份等非引文数值。"""
     expanded: List[int] = []
@@ -1062,6 +1128,7 @@ def extract_paragraph_info(p_elem: ET.Element, para_index: int) -> Dict[str, Any
     citation_tokens, citations = extract_citations_from_text(text)
     first_person = detect_first_person_pronouns(text)
     billing = compute_billable_chars(text)
+    apply_blockers = find_apply_blockers(p_elem)
 
     return {
         "para_index": para_index,
@@ -1076,6 +1143,9 @@ def extract_paragraph_info(p_elem: ET.Element, para_index: int) -> Dict[str, Any
         "has_field_codes": has_field_codes,
         "has_math": has_math,
         "has_page_break_before": has_page_break_before,
+        "apply_blockers": apply_blockers,
+        "can_apply": not apply_blockers,
+        "apply_notes": find_flatten_notes(p_elem),
         "highlight_colors": highlight_colors,
         "has_yellow_highlight": has_yellow_highlight,
         "all_runs_yellow": all_runs_yellow,
@@ -1169,6 +1239,9 @@ def inspect_docx(docx_path: Path) -> Dict[str, Any]:
             "all_citations_seen": sorted(seen),
             "citation_anomalies": anomalies,
             "first_person_paras": [p["para_index"] for p in paragraphs if p["first_person_pronouns"]],
+            "apply_blocked_paras": [
+                p["para_index"] for p in paragraphs if p["apply_blockers"] and not p["is_empty"]
+            ],
         },
         "paragraphs": paragraphs,
     }
@@ -1338,16 +1411,17 @@ def _replace_paragraph_preserving_structure(
     warnings: List[str],
     highlight_substrings: Optional[Sequence[str]] = None,
 ) -> None:
-    """无损替换单段正文，完整保留 <w:pPr>、书签/批注锚点与 <w:hyperlink r:id='...'> 关系节点。"""
-    if (
-        p_elem.find(f".//{w_tag('fldChar')}") is not None
-        or p_elem.find(f".//{w_tag('fldSimple')}") is not None
-        or any(el.tag.endswith("}oMath") or el.tag.endswith("}oMathPara") for el in p_elem.iter())
-    ):
+    """无损替换单段正文，完整保留 <w:pPr>、书签/批注锚点、批注引用与 <w:hyperlink r:id='...'> 关系节点。"""
+    blockers = find_apply_blockers(p_elem)
+    if blockers:
         raise CliError(
-            f"Paragraph {para_index} contains Word field codes or math equations (<w:fldChar>/<m:oMath>); "
-            "refusing to overwrite to prevent structure corruption."
+            f"Paragraph {para_index} contains {', '.join(blockers)}; refusing to overwrite to prevent "
+            "structure or content loss. Edit this paragraph manually in Word or exclude it."
         )
+    for note in find_flatten_notes(p_elem):
+        warn_msg = f"Paragraph {para_index}: {note}."
+        warnings.append(warn_msg)
+        log_stderr(f"Warning: {warn_msg}")
 
     ppr = p_elem.find(w_tag("pPr"))
     ppr_copy = copy.deepcopy(ppr) if ppr is not None else None
@@ -1355,6 +1429,12 @@ def _replace_paragraph_preserving_structure(
     start_anchors: List[ET.Element] = []
     end_anchors: List[ET.Element] = []
     hyperlink_records: List[Dict[str, Any]] = []
+    # 批注引用 run 不含正文文本，重建后追加到段尾锚点之后，保证批注仍挂在该段
+    comment_ref_runs: List[ET.Element] = [
+        copy.deepcopy(r_elem)
+        for r_elem in p_elem.iter(w_tag("r"))
+        if r_elem.find(w_tag("commentReference")) is not None
+    ]
 
     for child in list(p_elem):
         if child.tag in (w_tag("bookmarkStart"), w_tag("commentRangeStart")):
@@ -1441,6 +1521,8 @@ def _replace_paragraph_preserving_structure(
 
     for anc in end_anchors:
         p_elem.append(anc)
+    for ref_run in comment_ref_runs:
+        p_elem.append(ref_run)
 
 
 def apply_humanized_to_docx(
@@ -1473,6 +1555,10 @@ def apply_humanized_to_docx(
             raise CliError(f"Missing 'humanized_text' or 'text' for para_index={para_idx}.")
         if not isinstance(new_text, str):
             raise CliError(f"Text for para_index={para_idx} must be a string.")
+        if para_idx in humanized_map:
+            raise CliError(
+                f"Duplicate entries for para_index={para_idx}; merge split segments into one text before apply."
+            )
         humanized_map[para_idx] = new_text
         if isinstance(item.get("highlight"), bool):
             highlight_override_map[para_idx] = item["highlight"]
@@ -1893,17 +1979,17 @@ def check_quality_gate(
     allow_first_person: bool = False,
     max_word_len: int = 16,
 ) -> List[str]:
-    """执行 3 项质量门禁校验：第一人称代词、超长乱码拼接词、丢失文内引文 [n]。"""
+    """执行 3 项质量门禁校验：新引入的第一人称代词、超长乱码拼接词、丢失文内引文 [n]。"""
     issues: List[str] = []
 
-    # 1. 第一人称代词检查（可通过 --allow-first-person 关闭）
-    if not allow_first_person:
+    # 1. 第一人称代词检查：原文已使用第一人称时视为作者文风，不再拦截（亦可用 --allow-first-person 关闭）
+    if not allow_first_person and not detect_first_person_pronouns(source_text):
         fp_hits = detect_first_person_pronouns(returned_text)
         if fp_hits:
             unique_fp = list(dict.fromkeys(fp_hits))
             issues.append(f"first_person_pronoun:{','.join(unique_fp)}")
 
-    # 2. 检查 >max_word_len 字母纯英文连续拼接乱码词（剔除 URL 与用户白名单术语）
+    # 2. 检查 >max_word_len 字母纯英文连续拼接乱码词（剔除 URL、用户白名单术语及原文已有的长词）
     cleaned = URL_RE.sub(" ", returned_text)
     if personal_terms:
         for term in personal_terms:
@@ -1913,7 +1999,9 @@ def check_quality_gate(
                 suffix = r"\b" if (t[-1].isalnum() or t[-1] == "_") else r"(?!\w)"
                 cleaned = re.sub(f"{prefix}{re.escape(t)}{suffix}", " ", cleaned, flags=re.IGNORECASE)
     long_word_re = re.compile(rf"\b[A-Za-z]{{{max(1, max_word_len) + 1},}}\b")
-    long_words = long_word_re.findall(cleaned)
+    # interdisciplinary、characteristically 等真实长词若原文已出现，则不是接口粘连产生的乱码
+    source_long_words = {w.lower() for w in long_word_re.findall(URL_RE.sub(" ", source_text))}
+    long_words = [w for w in long_word_re.findall(cleaned) if w.lower() not in source_long_words]
     if long_words:
         unique_long = list(dict.fromkeys(long_words))
         issues.append(f"garbled_long_word:{','.join(unique_long)}")
@@ -1968,60 +2056,105 @@ def call_humanizer_api(
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw_resp = resp.read().decode("utf-8", errors="replace")
-                parsed = json.loads(raw_resp)
-                data_obj = parsed.get("data") if isinstance(parsed, dict) else None
-                ret_text = data_obj.get("text") if isinstance(data_obj, dict) else None
-                if not isinstance(ret_text, str) or ret_text == "":
-                    raise CliError(f"Unexpected API response from {api_url}: missing non-empty data.text.")
-                return parsed
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")[:1000]
-            if exc.code == 429:
+            err_code, _ = _parse_api_error_body(err_body)
+            code_label = f" [{err_code}]" if err_code else ""
+            if exc.code == 429 or exc.code >= 500:
                 if attempt + 1 >= attempts:
-                    raise RateLimitError(
-                        f"HTTP 429 Too Many Requests from {api_url} (rate_limit={rate_limit} req/s) "
-                        f"after {attempts} attempts. Response: {err_body}"
+                    error_cls = RateLimitError if exc.code == 429 else RuntimeError
+                    raise error_cls(
+                        f"HTTP {exc.code}{code_label} from {api_url} after {attempts} attempts "
+                        f"(rate_limit={rate_limit} req/s). Response: {err_body}"
                     ) from exc
-                retry_after_raw = exc.headers.get("Retry-After") if exc.headers else None
-                backoff = float(2 ** attempt)
-                if retry_after_raw:
-                    try:
-                        backoff = min(60.0, max(backoff, float(retry_after_raw)))
-                    except ValueError:
-                        pass
-                log_stderr(f"HTTP 429 from {api_url}; backing off {backoff:.1f}s (attempt {attempt + 1}/{attempts})...")
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                backoff = _backoff_seconds(attempt, retry_after)
+                log_stderr(
+                    f"HTTP {exc.code}{code_label} from {api_url}; retrying in {backoff:.1f}s "
+                    f"(attempt {attempt + 1}/{attempts})..."
+                )
                 time.sleep(backoff)
                 continue
 
-            if exc.code >= 500:
-                if attempt + 1 >= attempts:
-                    raise RuntimeError(
-                        f"Server HTTP {exc.code} from {api_url} after {attempts} attempts. Response: {err_body}"
-                    ) from exc
-                backoff = float(2 ** attempt)
-                log_stderr(f"HTTP {exc.code} from {api_url}; retrying in {backoff:.1f}s (attempt {attempt + 1}/{attempts})...")
-                time.sleep(backoff)
-                continue
-
-            hint = ""
+            hint = API_ERROR_HINTS.get(err_code or "", "")
             if exc.code == 402:
-                hint = f" Insufficient balance — please recharge at {RECHARGE_URL}."
+                hint = f"{hint or 'Insufficient balance.'} Top up at {RECHARGE_URL}."
             elif exc.code in (401, 403):
-                hint = f" Check your BUNNYSCHOLAR_API_KEY at {KEYS_URL}."
+                hint = f"{hint or 'Check your BUNNYSCHOLAR_API_KEY.'} Manage keys at {KEYS_URL}."
             raise ApiHttpError(
                 status_code=exc.code,
                 url=api_url,
                 body_preview=err_body,
-                message=f"HTTP {exc.code} from {api_url} (rate_limit={rate_limit} req/s).{hint} Body: {err_body}",
+                message=" ".join(part for part in (
+                    f"HTTP {exc.code}{code_label} from {api_url}.", hint, f"Body: {err_body}",
+                ) if part),
             ) from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except RETRYABLE_NETWORK_ERRORS as exc:
             if attempt + 1 >= attempts:
                 raise RuntimeError(f"Network error calling {api_url} after {attempts} attempts: {exc}") from exc
-            backoff = float(2 ** attempt)
-            log_stderr(f"Network/timeout error calling {api_url}: {exc}; retrying in {backoff:.1f}s...")
+            backoff = _backoff_seconds(attempt)
+            billing_note = ""
+            if _is_timeout_error(exc):
+                # 读超时意味着服务端可能已处理并计费，重发前明确提示，便于用户对账
+                billing_note = f" The timed-out request may still be billed; compare usage at {CONSOLE_URL}."
+            log_stderr(
+                f"Network/timeout error calling {api_url}: {exc}; retrying in {backoff:.1f}s "
+                f"(attempt {attempt + 1}/{attempts}).{billing_note}"
+            )
             time.sleep(backoff)
+            continue
+
+        return _parse_humanizer_response(raw_resp, api_url)
 
     raise RuntimeError(f"Failed calling {api_url} after {attempts} attempts.")
+
+
+def _parse_api_error_body(raw_body: str) -> Tuple[Optional[str], Optional[str]]:
+    """从错误响应体提取官方错误码与说明，兼容 {code,message} 与 {error:{code,message}} 两种结构。"""
+    try:
+        parsed = json.loads(raw_body)
+    except (ValueError, TypeError):
+        return None, None
+    if not isinstance(parsed, dict):
+        return None, None
+    container = parsed.get("error") if isinstance(parsed.get("error"), dict) else parsed
+    code = container.get("code")
+    if code is None and isinstance(parsed.get("error"), str):
+        code = parsed["error"]
+    message = container.get("message") or container.get("msg") or container.get("detail")
+    return (str(code) if code is not None else None), (str(message) if message else None)
+
+
+def _parse_humanizer_response(raw_resp: str, api_url: str) -> Dict[str, Any]:
+    """校验成功响应必须为 JSON 且包含非空 data.text，否则附带服务端错误信息抛出 CliError。"""
+    try:
+        parsed = json.loads(raw_resp)
+    except ValueError as exc:
+        raise CliError(f"Non-JSON response from {api_url}: {raw_resp[:300]!r}") from exc
+    data_obj = parsed.get("data") if isinstance(parsed, dict) else None
+    ret_text = data_obj.get("text") if isinstance(data_obj, dict) else None
+    if not isinstance(ret_text, str) or not ret_text.strip():
+        err_code, err_message = _parse_api_error_body(raw_resp)
+        detail = f" ({err_code or 'error'}: {err_message or 'no message'})" if (err_code or err_message) else ""
+        raise CliError(f"Unexpected API response from {api_url}: missing non-empty data.text{detail}.")
+    return parsed
+
+
+def _backoff_seconds(attempt: int, retry_after: Optional[str] = None) -> float:
+    """计算指数退避等待秒数，优先遵循服务端 Retry-After，并统一封顶 MAX_BACKOFF_SECONDS。"""
+    backoff = min(MAX_BACKOFF_SECONDS, float(2 ** attempt))
+    if retry_after:
+        try:
+            backoff = min(MAX_BACKOFF_SECONDS, max(backoff, float(retry_after)))
+        except ValueError:
+            pass
+    return backoff
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    """判断异常（含 URLError 包装的 reason）是否为超时。"""
+    reason = getattr(exc, "reason", None)
+    return isinstance(exc, (socket.timeout, TimeoutError)) or isinstance(reason, (socket.timeout, TimeoutError))
 
 
 def _parse_personal_terms(raw: Optional[str]) -> Optional[List[str]]:
@@ -2202,8 +2335,13 @@ def run_humanize_batch(
     disable_quality_gate: bool = False,
     text_file: Optional[str] = None,
     dry_run: bool = False,
+    resume: bool = False,
 ) -> Dict[str, Any]:
-    """预检段落长度与语言/平台参数，并按需调用 API 与检查改写结果。"""
+    """预检段落长度与语言/平台参数，并按需调用 API 与检查改写结果。
+
+    每完成一段即把累计结果原子写入 output_path；中途失败时已付费的段落不会丢失，
+    之后用 resume=True 以相同参数重跑即可跳过已完成段落、避免重复计费。
+    """
     if language not in SUPPORTED_HUMANIZER_LANGUAGES:
         raise CliError(
             f"Unsupported --language '{language}' for BunnyScholar humanizer; "
@@ -2220,8 +2358,19 @@ def run_humanize_batch(
         dry_warnings.append(warn_msg)
         log_stderr(f"Warning: {warn_msg}")
 
+    # 数值参数前置校验，避免进入付费请求循环后才报错
+    if rate_limit <= 0:
+        raise CliError(f"--rate-limit must be > 0, got {rate_limit}.")
+    if timeout <= 0:
+        raise CliError(f"--timeout must be > 0, got {timeout}.")
+    if max_word_len < 1:
+        raise CliError(f"--max-word-len must be >= 1, got {max_word_len}.")
+    if max_retries < 0:
+        raise CliError(f"--max-retries must be >= 0, got {max_retries}.")
+
     if not dry_run and output_path is None:
         raise CliError("Provide --output for live requests, or use --dry-run to check the input first.")
+    output_file = Path(output_path) if output_path is not None else None
 
     if text_file is not None:
         label = "standard input" if text_file == "-" else text_file
@@ -2250,14 +2399,15 @@ def run_humanize_batch(
         if not isinstance(src_text, str) or not src_text.strip():
             raise CliError(f"Missing non-empty 'text' for para_index={para_index}.")
         billable = compute_billable_chars(src_text)["billable_chars"]
-        if billable < 20 or billable > 500:
+        if billable < HUMANIZER_MIN_BILLABLE or billable > HUMANIZER_MAX_BILLABLE:
             advice = (
                 "Skip short text or merge before calling."
-                if billable < 20
+                if billable < HUMANIZER_MIN_BILLABLE
                 else "Split paragraph at sentence boundaries (.) before calling."
             )
             raise CliError(
-                f"Paragraph {para_index} billable length is {billable} units, outside API required range [20, 500]. {advice}"
+                f"Paragraph {para_index} billable length is {billable} units, outside API required range "
+                f"[{HUMANIZER_MIN_BILLABLE}, {HUMANIZER_MAX_BILLABLE}]. {advice}"
             )
         validated_items.append((para_index, src_text, billable))
 
@@ -2300,8 +2450,81 @@ def run_humanize_batch(
     results: List[Dict[str, Any]] = []
     failed_paras: List[int] = []
     total_cost = 0.0
+    resumed_count = 0
+
+    def _build_payload(
+        status: str = "completed",
+        interrupted_para: Optional[int] = None,
+        error_msg: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "status": status,
+            "api_url": api_url,
+            "key_source": key_source,
+            "language": language,
+            "platform": resolved_platform,
+            "dual_stage": bool(dual_stage),
+            "allow_first_person": bool(allow_first_person),
+            "max_word_len": int(max_word_len),
+            "quality_gate_enabled": not bool(disable_quality_gate),
+            "rate_limit": rate_limit,
+            "expected_paragraphs": len(validated_items),
+            "completed_paragraphs": len(results),
+            "resumed_count": resumed_count,
+            "total_paragraphs": len(results),
+            "passed_count": sum(1 for r in results if r["quality_passed"]),
+            "failed_count": len(failed_paras),
+            "failed_paras": list(failed_paras),
+            "total_usage_amount": round(total_cost, 6),
+            "paragraphs": results,
+        }
+        if interrupted_para is not None:
+            payload["interrupted_para"] = interrupted_para
+        if error_msg is not None:
+            payload["error"] = error_msg
+        return payload
+
+    resumed_by_para: Dict[int, Dict[str, Any]] = {}
+    if resume and output_file is not None and output_file.exists():
+        try:
+            existing_raw = json.loads(output_file.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CliError(f"Failed to read checkpoint file {output_file} for --resume: {exc}") from exc
+        if not isinstance(existing_raw, dict):
+            raise CliError(f"Invalid checkpoint file {output_file}: root must be a JSON object.")
+        for key_name, current_val in (
+            ("language", language),
+            ("platform", resolved_platform),
+            ("dual_stage", bool(dual_stage)),
+            ("api_url", api_url),
+        ):
+            if key_name in existing_raw and existing_raw[key_name] != current_val:
+                raise CliError(
+                    f"Checkpoint {output_file} has {key_name}={existing_raw[key_name]!r}, "
+                    f"which does not match current {current_val!r}; refusing --resume."
+                )
+        for prev in existing_raw.get("paragraphs", []):
+            if isinstance(prev, dict) and isinstance(prev.get("para_index"), int):
+                resumed_by_para[prev["para_index"]] = prev
 
     for para_index, src_text, billable in validated_items:
+        prev_entry = resumed_by_para.get(para_index)
+        if (
+            prev_entry is not None
+            and prev_entry.get("source_text") == src_text
+            and isinstance(prev_entry.get("text"), str)
+            and prev_entry["text"].strip()
+        ):
+            log_stderr(f"Resuming paragraph {para_index} from checkpoint...")
+            resumed_count += 1
+            prev_usage = prev_entry.get("usage")
+            if isinstance(prev_usage, dict) and isinstance(prev_usage.get("amount"), (int, float)):
+                total_cost += float(prev_usage["amount"])
+            if not prev_entry.get("quality_passed", True):
+                failed_paras.append(para_index)
+            results.append(prev_entry)
+            continue
+
         log_stderr(f"Humanizing paragraph {para_index} (billable={billable}, dual_stage={dual_stage})...")
         last_text = ""
         last_issues: List[str] = []
@@ -2309,48 +2532,67 @@ def run_humanize_batch(
         attempts_used = 0
         passed = False
 
-        for round_idx in range(1, total_gate_rounds + 1):
-            attempts_used = round_idx
-            resp = call_humanizer_api(
-                text=src_text,
-                api_key=api_key,
-                api_url=api_url,
-                dual_stage=dual_stage,
-                rate_limit=rate_limit,
-                lock_path=resolved_lock,
-                timeout=timeout,
-                http_retries=http_retries,
-                personal_terms=personal_terms,
-                language=language,
-                platform_name=resolved_platform,
-            )
-            # 保留服务的原始候选文本，便于比较与复测。
-            api_text = resp["data"]["text"]
-            last_text = api_text
-            last_usage = resp.get("usage") if isinstance(resp.get("usage"), dict) else {}
-            if isinstance(last_usage.get("amount"), (int, float)):
-                total_cost += float(last_usage["amount"])
+        try:
+            for round_idx in range(1, total_gate_rounds + 1):
+                attempts_used = round_idx
+                resp = call_humanizer_api(
+                    text=src_text,
+                    api_key=api_key,
+                    api_url=api_url,
+                    dual_stage=dual_stage,
+                    rate_limit=rate_limit,
+                    lock_path=resolved_lock,
+                    timeout=timeout,
+                    http_retries=http_retries,
+                    personal_terms=personal_terms,
+                    language=language,
+                    platform_name=resolved_platform,
+                )
+                # 保留服务的原始候选文本，便于比较与复测。
+                api_text = resp["data"]["text"]
+                last_text = api_text
+                last_usage = resp.get("usage") if isinstance(resp.get("usage"), dict) else {}
+                if isinstance(last_usage.get("amount"), (int, float)):
+                    total_cost += float(last_usage["amount"])
 
-            if disable_quality_gate:
-                issues = []
-                passed = True
-                break
+                if disable_quality_gate:
+                    issues = []
+                    passed = True
+                    break
 
-            issues = check_quality_gate(
-                src_text,
-                api_text,
-                personal_terms=personal_terms,
-                allow_first_person=allow_first_person,
-                max_word_len=max_word_len,
-            )
-            last_issues = issues
-            if not issues:
-                passed = True
-                break
-            log_stderr(
-                f"Quality gate failed for para {para_index} on attempt {round_idx}/{total_gate_rounds}: "
-                f"{'; '.join(issues)}"
-            )
+                issues = check_quality_gate(
+                    src_text,
+                    api_text,
+                    personal_terms=personal_terms,
+                    allow_first_person=allow_first_person,
+                    max_word_len=max_word_len,
+                )
+                last_issues = issues
+                if not issues:
+                    passed = True
+                    break
+                log_stderr(
+                    f"Quality gate failed for para {para_index} on attempt {round_idx}/{total_gate_rounds}: "
+                    f"{'; '.join(issues)}"
+                )
+        except (CliError, RateLimitError, ApiHttpError, OSError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+            if results and output_file is not None:
+                atomic_write_bytes(
+                    output_file,
+                    (
+                        json.dumps(
+                            _build_payload(status="interrupted", interrupted_para=para_index, error_msg=str(exc)),
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                        + "\n"
+                    ).encode("utf-8"),
+                )
+                raise BatchInterruptedError(
+                    f"Batch interrupted at paragraph {para_index}: {exc}. "
+                    f"Saved {len(results)} completed paragraph(s) to {output_file}; re-run with --resume to continue."
+                ) from exc
+            raise
 
         if not passed:
             failed_paras.append(para_index)
@@ -2383,24 +2625,13 @@ def run_humanize_batch(
                     "see missing_personal_terms in the result."
                 )
         results.append(result)
+        if output_file is not None:
+            atomic_write_bytes(
+                output_file,
+                (json.dumps(_build_payload(status="in_progress"), ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+            )
 
-    output_payload = {
-        "api_url": api_url,
-        "key_source": key_source,
-        "language": language,
-        "platform": resolved_platform,
-        "dual_stage": bool(dual_stage),
-        "allow_first_person": bool(allow_first_person),
-        "max_word_len": int(max_word_len),
-        "quality_gate_enabled": not bool(disable_quality_gate),
-        "rate_limit": rate_limit,
-        "total_paragraphs": len(results),
-        "passed_count": sum(1 for r in results if r["quality_passed"]),
-        "failed_count": len(failed_paras),
-        "failed_paras": failed_paras,
-        "total_usage_amount": round(total_cost, 6),
-        "paragraphs": results,
-    }
+    output_payload = _build_payload(status="completed")
     emit_result(output_payload, str(output_path))
 
     if failed_paras and not allow_quality_warnings:
@@ -2650,7 +2881,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_hum.add_argument("--http-retries", type=int, default=DEFAULT_HTTP_RETRIES, help="Max HTTP 429/5xx attempts per call (default: 3).")
     p_hum.add_argument("--api-url", default=DEFAULT_API_URL, help=f"API endpoint URL (default: {DEFAULT_API_URL}).")
     p_hum.add_argument("--lock-file", default=None, help="Cross-process rate-limit lock file path.")
-    p_hum.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="HTTP request timeout in seconds (default: 30.0).")
+    p_hum.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="HTTP request timeout in seconds (default: 60.0).")
+    p_hum.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from an existing --output checkpoint JSON and skip already completed paragraphs.",
+    )
     p_hum.add_argument(
         "--personal-terms", default=None,
         help="Comma-separated terms or a JSON array; sent to BunnyScholar and checked in the final candidate.",
@@ -2816,6 +3052,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 disable_quality_gate=bool(args.disable_quality_gate),
                 text_file=args.text_file,
                 dry_run=args.dry_run,
+                resume=bool(args.resume),
             )
             return 0
 
@@ -2869,6 +3106,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         CliError,
         RateLimitError,
         ApiHttpError,
+        BatchInterruptedError,
         QualityGateError,
         OSError,
         json.JSONDecodeError,
