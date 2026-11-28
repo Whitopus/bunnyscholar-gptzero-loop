@@ -19,7 +19,7 @@ Word 文件可先用 `inspect --docx paper.docx` 查看段落索引、引文、�
 }
 ```
 
-输入过长时按自然语义切分，改写后合并到原 Word 段号。`humanize` 保存 API 返回的文本与质量提示。`--allow-first-person` 适合原本就使用第一人称的文章，`--allow-quality-warnings` 保留提示并让可人工复核的批次正常完成。质量检查默认只评估当次结果，`--max-retries N` 用于显式选择额外改写尝试。`--dual-stage` 会先降重再拟人化，适合用户同时需要两个指标并接受较大改动时。
+输入过长时按自然语义切分，改写后合并到原 Word 段号。`humanize` 保存 API 返回的文本与质量提示。`--allow-first-person` 适合原本就使用第一人称的文章，`--allow-quality-warnings` 保留提示并让可人工复核的批次正常完成。质量检查默认只评估当次结果，`--max-retries N` 用于显式选择额外改写尝试。`--dual-stage` 会先降重再拟人化（同等计费字符），当单阶段改写被 GPTZero 识别为 `AI Paraphrased` 时，直接切换 `--dual-stage` 通常比反复单阶段更有效。
 
 用 `apply --highlight-paras 6,7` 涂黄整段。要涂黄短语，在供 `apply` 读取的结果 JSON 里为相应段落加入 `"highlight_substrings": ["exact phrase"]`。仅在用户要求清理已有高亮时使用 `--clear-other-highlights`。常见样式和超链接可由脚本保留，改到包含链接、公式、复杂行内样式或引用的段落时，打开交付稿核对。
 
@@ -39,7 +39,7 @@ Agent 先读本轮要改的原文和已有报告，自己挑出必须原样保�
 python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output result.json --personal-terms "VALORANT,Riot Games,twenty-four hours"
 ```
 
-带逗号的术语用 JSON 字符串数组传入。用 `--dry-run` 可先查看每段命中的 `matched_personal_terms`。改写结果用 `missing_personal_terms` 提示原文中出现、候选中未按相同措辞出现的术语，比较忽略大小写和空白差异。像 `twenty-four hours` 写成 `24 hours` 也会列出，方便结合语义核对。提示本身不会触发付费重试。
+带逗号、引号或英文弯撇号 `’` 的术语（尤其在 Windows PowerShell 中）推荐改用 `--personal-terms-file terms.json`（UTF-8 JSON 数组或每行一条的纯文本，支持 `#` 注释），避免命令行引号转义报错。用 `--dry-run` 可先查看每段命中的 `matched_personal_terms`。改写结果用 `missing_personal_terms` 提示原文中出现、候选中未按相同措辞出现的术语，比较忽略大小写和空白差异。像 `twenty-four hours` 写成 `24 hours` 也会列出，方便结合语义核对。提示本身不会触发付费重试。
 
 <a id="review-candidate"></a>
 
@@ -61,4 +61,4 @@ python scripts/humanizer_loop.py review-text --source original.txt --candidate c
 
 另存候选，再对照原稿与上一版可用候选。核对数量、单位、时间间隔、引文，以及「看起来」「可能」等限定。`quality_passed` 只表示脚本的几项检查通过。候选丢了事实或改了用户要求原样保留的词，就保留上一版可用候选或原文。继续放宽会影响明确要求、超出授权范围或预算时，再和用户讨论。
 
-复测尽量用同样的文本范围和扫描模式。整体分数变化后，仍可查看目标页和未改页是否发生变化。短尾页或跨页段落难比较时，先对照实际正文位置。最终记录采用的版本、实测范围、结果和费用。
+多轮迭代建议采用「冻结已过关段落 + 局部纯文本试跑 + 终稿整篇 PDF 一次终验」策略：先冻结已达标的段落，仅粘贴待改段落做纯文本复测，确认过关后再导出整篇 PDF 做唯一一次终验，可大幅节省扫描额度。最终记录采用的版本、实测范围、结果和费用。

@@ -46,7 +46,7 @@ DEFAULT_API_URL = "https://bunnyscholar.cn/api/open/humanizer"
 LOGIN_URL = "https://bunnyscholar.cn/"
 CONSOLE_URL = "https://bunnyscholar.cn/developer"
 BUNNYSCHOLAR_SKILL_URL = "https://bunnyscholar.cn/skills/bunnyscholar-api.md"
-SKILL_VERSION = "1.3.0"
+SKILL_VERSION = "1.3.1"
 SUPPORTED_HUMANIZER_LANGUAGES: Tuple[str, ...] = ("en", "zh_CN")
 SUPPORTED_PLATFORMS_BY_LANGUAGE: Dict[str, Tuple[str, ...]] = {
     "zh_CN": ("cnki", "wanfang", "weipu", "gezida", "daya", "turnitin"),
@@ -2172,6 +2172,45 @@ def _parse_personal_terms(raw: Optional[str]) -> Optional[List[str]]:
     return terms or None
 
 
+def _load_personal_terms_file(path: Path) -> List[str]:
+    """从 UTF-8 文件读取术语白名单（支持 JSON 数组/对象或逐行纯文本，忽略 # 注释）。"""
+    if not path.is_file():
+        raise CliError(f"Personal terms file not found: {path}")
+    raw = path.read_text(encoding="utf-8-sig").strip()
+    if not raw:
+        return []
+    if raw.startswith("[") or raw.startswith("{"):
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            for key in ("personal_terms", "terms"):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                raise CliError(f"Personal terms JSON object in {path} must contain a 'personal_terms' or 'terms' list.")
+        if not isinstance(parsed, list):
+            raise CliError(f"Personal terms JSON in {path} must be an array of strings.")
+        return [str(x).strip() for x in parsed if str(x).strip()]
+    terms: List[str] = []
+    for line in raw.splitlines():
+        item = line.strip()
+        if not item or item.startswith("#"):
+            continue
+        terms.append(item)
+    return terms
+
+
+def _resolve_personal_terms(raw: Optional[str], terms_file: Optional[Path]) -> Optional[List[str]]:
+    """合并 --personal-terms 与 --personal-terms-file 并保持顺序去重。"""
+    merged: List[str] = []
+    if raw:
+        merged.extend(_parse_personal_terms(raw) or [])
+    if terms_file is not None:
+        merged.extend(_load_personal_terms_file(terms_file))
+    deduped = list(dict.fromkeys(merged))
+    return deduped or None
+
+
 def _matching_personal_terms(text: str, terms: Sequence[str]) -> List[str]:
     """查找原样出现的术语，忽略大小写及空白差异。"""
     normalized_text = " ".join(text.split())
@@ -2773,10 +2812,15 @@ def export_pdf(
 
     staged_path: Optional[str] = None
     if stage_to is not None:
-        stage_dir = stage_to.resolve()
-        stage_dir.mkdir(parents=True, exist_ok=True)
-        dst_staged = stage_dir / pdf_abs.name
-        atomic_copy_file(pdf_abs, dst_staged)
+        resolved_stage = stage_to.resolve()
+        if not resolved_stage.is_dir() and resolved_stage.suffix.lower() == ".pdf":
+            dst_staged = resolved_stage
+            dst_staged.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            resolved_stage.mkdir(parents=True, exist_ok=True)
+            dst_staged = resolved_stage / pdf_abs.name
+        if dst_staged != pdf_abs:
+            atomic_copy_file(pdf_abs, dst_staged)
         staged_path = str(dst_staged)
 
     return {
@@ -2849,7 +2893,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_snap.add_argument("--mixed", type=float, default=None, help="Mixed percentage (0-100).")
     p_snap.add_argument("--ai", type=float, default=None, help="AI percentage (0-100).")
     p_snap.add_argument("--pages", default=None, help="Page-by-page scores as JSON or '1=98,2=87'.")
-    p_snap.add_argument("--note", default="", help="Version note describing changes.")
+    p_snap.add_argument("--note", "--label", dest="note", default="", help="Version note or label describing changes (alias: --label).")
     p_snap.add_argument("--output", default=None, help="Optional path to write UTF-8 JSON report.")
 
     # 4. rollback
@@ -2891,6 +2935,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--personal-terms", default=None,
         help="Comma-separated terms or a JSON array; sent to BunnyScholar and checked in the final candidate.",
     )
+    p_hum.add_argument(
+        "--personal-terms-file", type=Path, default=None,
+        help="UTF-8 file of personal terms (JSON array or one term per line); avoids shell quoting issues.",
+    )
     p_hum.add_argument("--env-paths", nargs="+", default=None, help="Override .env file paths for API key lookup.")
     p_hum.add_argument("--ignore-process-env", action="store_true", help="Ignore BUNNYSCHOLAR_API_KEY in process env.")
     p_hum.add_argument(
@@ -2918,7 +2966,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write unmodified humanized text back into .docx while preserving styles and <w:hyperlink> nodes.",
     )
     p_apply.add_argument("--docx", required=True, help="Source .docx file path.")
-    p_apply.add_argument("--humanized", required=True, help="JSON file from humanize command.")
+    p_apply.add_argument("--humanized", "--input", dest="humanized", required=True, help="JSON file from humanize command (alias: --input).")
     p_apply.add_argument("--output-docx", default=None, help="Target .docx path (default: overwrite --docx atomically).")
     p_apply.add_argument("--highlight-paras", default=None, help="Comma-separated 1-based paragraph indices to highlight yellow.")
     p_apply.add_argument("--clear-other-highlights", action="store_true", help="Clear highlights on paragraphs not in --highlight-paras.")
@@ -2931,7 +2979,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pdf.add_argument("--docx", required=True, help="Source .docx file path.")
     p_pdf.add_argument("--pdf", default=None, help="Target PDF output path (default: same name with .pdf).")
-    p_pdf.add_argument("--stage-to", default=None, help="Optional directory to copy the exported PDF into.")
+    p_pdf.add_argument("--stage-to", default=None, help="Optional directory or target .pdf file path to copy the exported PDF into.")
     p_pdf.add_argument(
         "--backend",
         choices=("auto", "word", "soffice"),
@@ -3030,7 +3078,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 0
 
         if args.command == "humanize":
-            terms = _parse_personal_terms(args.personal_terms)
+            terms = _resolve_personal_terms(args.personal_terms, args.personal_terms_file)
             run_humanize_batch(
                 input_path=args.input,
                 output_path=args.output,

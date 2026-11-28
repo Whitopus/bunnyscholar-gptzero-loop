@@ -3,7 +3,7 @@ name: bunnyscholar-gptzero-loop
 description: >-
   Use BunnyScholar's Humanizer API for Chinese or English text, optionally review GPTZero results, and apply selected revisions to Word. Use for 拟人改写、降 AI 率、GPTZero 报告复核 or reversible DOCX revisions.
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
   source: https://raw.githubusercontent.com/Whitopus/bunnyscholar-gptzero-loop/main/SKILL.md
   repo: https://github.com/Whitopus/bunnyscholar-gptzero-loop
 ---
@@ -20,13 +20,13 @@ Follow the user's text, language, target platform, scope, and deliverable. Use t
 | Check or update the Skill | Run `self-update` to check the installed version. If the user asks to update, run `self-update --apply`, verify the reported version, and read the updated Skill before continuing. See the [update instructions](README.md#update). |
 | Rewrite pasted text or a short text file | Read the selected text and identify what needs preserving before the first rewrite. Use `humanize --text-file paragraph.txt --output result.json --allow-quality-warnings` for one paragraph, or `--input` with JSON for a batch (each completed paragraph is checkpointed; pass `--resume` to continue an interrupted batch without re-billing). Use `--dry-run` when useful for checking length or estimating usage. Return a candidate and call out meaning or terminology issues that need review. |
 | Interpret a GPTZero report | Start with the supplied report, screenshot, or share link. If the user wants a fresh result, use the available browser or ask for a new report only when access is blocked. See [GPTZero browser notes](references/gptzero_browser_sop.md). |
-| Revise an existing Word file | Use `inspect` to identify paragraph IDs and compare them with the report. Work on a copy via `apply --output-docx` or keep a snapshot when editing in place (`apply` refuses to overwrite paragraphs containing embedded images, drawings, or footnote/endnote references). Check the affected paragraphs and layout. Export and scan a PDF only when page-level results matter. See the [Word and iteration notes](references/anti_ai_playbook.md). |
+| Revise an existing Word file | Use `inspect` to identify paragraph IDs and compare them with the report. Work on a copy via `apply --output-docx` or keep a snapshot when editing in place (`apply` refuses to overwrite paragraphs containing embedded images, drawings, or footnote/endnote references). Check the affected paragraphs and layout. Freeze already-passing paragraphs and re-scan only revised text snippets locally; export and scan a full PDF only once at final verification to save credits. See the [Word and iteration notes](references/anti_ai_playbook.md). |
 
 ## Decide what to preserve before rewriting
 
 - Inspect the selected text or supplied report yourself. Identify wording that must stay verbatim, wording worth keeping initially but open to later changes, and facts whose wording can vary. Start with a short list.
 - When the proposed choices matter and the user has left them open, agree on the required wording and the room for later changes in one short exchange before the first API rewrite. Continue local preparation in the meantime. If the user has settled or delegated those choices, proceed within that scope. If no wording needs special protection, proceed directly.
-- Pass the currently protected wording via `--personal-terms`. When a comparable scan stalls or a candidate reads rigidly, use later authorized rounds to loosen optional wording in small steps. Allow equivalent phrases first and consider broader changes to sentence structure if warranted. Keep required wording, factual meaning, and citations. Review `missing_personal_terms` and compare each candidate with the source and the best acceptable version. Ask again only if a useful next step would change a requirement or exceed the authorized scope or budget. See the [iteration example](references/anti_ai_playbook.md#loosen-wording).
+- Pass the currently protected wording via `--personal-terms` (or `--personal-terms-file` on Windows PowerShell or when terms contain commas/curly apostrophes). When a single-stage rewrite is flagged as `AI Paraphrased`, switch to `--dual-stage`. When a comparable scan stalls or a candidate reads rigidly, use later authorized rounds to loosen optional wording in small steps. Allow equivalent phrases first and consider broader changes to sentence structure if warranted. Keep required wording, factual meaning, and citations. Review `missing_personal_terms` and compare each candidate with the source and the best acceptable version. Ask again only if a useful next step would change a requirement or exceed the authorized scope or budget. See the [iteration example](references/anti_ai_playbook.md#loosen-wording).
 
 ## Help the user sign in or switch accounts
 

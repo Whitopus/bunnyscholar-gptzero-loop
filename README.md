@@ -92,7 +92,7 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output res
 
 默认按英文 GPTZero 处理；中文知网只需追加 `--language zh_CN`（会自动默认 `cnki`）。多段或需对应 Word 段号时改用 `--input paragraphs.json`；每完成一段会自动写入 checkpoint，中途中断可加 `--resume` 续跑以避免重复计费。[JSON 示例与 Word 操作](references/anti_ai_playbook.md)
 
-**保留关键词**。Agent 会先读原文，建议哪些词必须原样保留、哪些可以在复测停滞时逐步放开，再和你简短确认。你已经给了明确要求，或说「你定」，它就直接继续。手动用 CLI 时可传 `--personal-terms "VALORANT,Riot Games"`。 [术语白名单用法](references/anti_ai_playbook.md#personal-terms) · [后续轮次示例](references/anti_ai_playbook.md#loosen-wording)
+**保留关键词**。Agent 会先读原文，建议哪些词必须原样保留、哪些可以在复测停滞时逐步放开，再和你简短确认。你已经给了明确要求，或说「你定」，它就直接继续。手动用 CLI 时可传 `--personal-terms "VALORANT,Riot Games"`；在 Windows PowerShell 或术语含逗号/弯撇号 `’` 时推荐改用 `--personal-terms-file terms.json`。 [术语白名单用法](references/anti_ai_playbook.md#personal-terms) · [后续轮次示例](references/anti_ai_playbook.md#loosen-wording)
 
 **复测前核对**。改写结果按段提示数字、单位、否定和限定词的变化。Agent 先看这些变化会不会改掉原意，再判断是否送检。 [候选稿核对](references/anti_ai_playbook.md#review-candidate)
 
@@ -102,8 +102,8 @@ python scripts/humanizer_loop.py humanize --text-file paragraph.txt --output res
 | `setup-key` | 自动复用已有 Key，或在本地终端无回显录入并验证保存结果（默认写入 `~/.env`）。 |
 | `review-text --source original.txt --candidate candidate.txt` | 离线核对两份文本中的数字、单位、否定和限定词。 |
 | `inspect --docx paper.docx` | 找正文段号、引文、高亮与硬分页。 |
-| `apply --docx paper.docx --humanized result.json --output-docx paper.revised.docx` | 按匹配的段号写入选定结果并另存副本（自动拦截含图片或脚注/尾注的段落以防丢失）。 |
-| `snapshot --docx paper.docx` / `rollback --docx paper.docx --list` | 多轮修订时存档、查看或恢复版本。 |
+| `apply --docx paper.docx --humanized result.json --output-docx paper.revised.docx` | 按匹配的段号写入选定结果并另存副本（`--humanized` 支持别名 `--input`；自动拦截含图片或脚注/尾注的段落以防丢失）。 |
+| `snapshot --docx paper.docx` / `rollback --docx paper.docx --list` | 多轮修订时存档（`--note` 支持别名 `--label`）、查看或恢复版本。 |
 | `export-pdf --docx paper.revised.docx` | 用 Windows Word 或 LibreOffice 导出 PDF。 |
 | `self-update` / `self-update --apply` | [检查与更新 Skill](#update)。 |
 
